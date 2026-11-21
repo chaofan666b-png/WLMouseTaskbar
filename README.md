@@ -12,8 +12,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  ...  │ [🔋 90%] │  ⌃  🔊  📶  🔋  14:29   │
-│         WL Mouse                                          │
+│  ...  │ 🔋 90%  ⌃  🔊  📶  🔋  14:29   │
 └──────────────────────────────────────────────────────────┘
          ↑ WLMouseTaskbar
 ```
@@ -22,11 +21,28 @@
 Motion Sync、去抖、休眠时间**——全部写进板载内存，改完立刻生效。
 设置界面是 Windows 11「设置」那套 Fluent 布局。
 
-## 快速开始
+## 下载
+
+到 [Releases](https://github.com/chaofan666b-png/WLMouseTaskbar/releases/latest) 下载，
+双击即用，无需安装、无需管理员权限。
+
+| 文件 | 大小 | 说明 |
+| --- | --- | --- |
+| `...-framework-dependent.exe` | 约 0.9 MB | **推荐**，需要已装 [.NET 9 桌面运行时](https://dotnet.microsoft.com/download/dotnet/9.0) |
+| `...-standalone.exe` | 约 69 MB | 不装运行时也能跑 |
+
+## 从源码构建
 
 ```bash
 cd WLMouseTaskbar
 dotnet run
+```
+
+发布单文件：
+
+```bash
+dotnet publish -c Release -r win-x64 --self-contained false \
+  -p:PublishSingleFile=true -p:DebugType=None -o dist
 ```
 
 需要 .NET 9 桌面运行时。已发布的单文件版本在
