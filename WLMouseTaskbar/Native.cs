@@ -147,20 +147,173 @@ internal static class Native
     public static extern int GetWindowRgn(IntPtr hwnd, IntPtr region);
 
     /// <summary>
+    /// 采样屏幕上一小块区域，判断里面有没有「东西」（文字、图标、卡片边缘）。
+    ///
+    /// 只看窗口 region 是不够的：任务栏挂件（FluentFlyout 之类）在不显示内容时
+    /// 窗口和 region 都还在，只是画出来是透明的。实测空任务栏区域相邻像素的
+    /// 平均亮度差约 1.2，里面真有控件时是 12 以上，阈值取 3.5 足够区分。
+    /// </summary>
+    public static bool RegionHasContent(int screenX, int screenY, int width, int height,
+        double threshold = 3.5)
+    {
+        if (width <= 1 || height <= 1) return false;
+
+        try
+        {
+            using var bitmap = new System.Drawing.Bitmap(width, height,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+            using (System.Drawing.Graphics graphics = System.Drawing.Graphics.FromImage(bitmap))
+            {
+                graphics.CopyFromScreen(screenX, screenY, 0, 0,
+                    new System.Drawing.Size(width, height), System.Drawing.CopyPixelOperation.SourceCopy);
+            }
+
+            System.Drawing.Imaging.BitmapData data = bitmap.LockBits(
+                new System.Drawing.Rectangle(0, 0, width, height),
+                System.Drawing.Imaging.ImageLockMode.ReadOnly,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+            double sum = 0;
+            long count = 0;
+
+            try
+            {
+                int stride = data.Stride;
+                var buffer = new byte[stride * height];
+                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
+
+                // 每隔 3 行采一条，够用且快
+                for (int y = 0; y < height; y += 3)
+                {
+                    int row = y * stride;
+                    double previous = -1;
+
+                    for (int x = 0; x < width; x++)
+                    {
+                        int i = row + x * 4;
+                        double luma = 0.299 * buffer[i + 2] + 0.587 * buffer[i + 1] + 0.114 * buffer[i];
+
+                        if (previous >= 0)
+                        {
+                            sum += Math.Abs(luma - previous);
+                            count++;
+                        }
+
+                        previous = luma;
+                    }
+                }
+            }
+            finally
+            {
+                bitmap.UnlockBits(data);
+            }
+
+            return count > 0 && sum / count > threshold;
+        }
+        catch
+        {
+            // 采不到就当作有内容，宁可让开也不要盖住别人
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// 在通知区域里找最左侧那个可见图标（Windows 11 是「显示隐藏的图标」箭头）的左边缘，
+    /// 返回相对 <paramref name="screenLeft"/> 的偏移；没找到返回 -1。
+    /// Windows 11 的通知区不暴露子窗口，只能靠像素找。
+    /// </summary>
+    /// <param name="excludeLeft">要跳过的横向区间（屏幕坐标），一般传自己的窗口矩形。</param>
+    /// <param name="excludeRight">
+    /// 不排除的话会把控件自己画出来的像素当成托盘图标，锚点就会跟着自己跑。
+    /// </param>
+    public static int FindTrayContentLeft(int screenLeft, int screenTop, int width, int height,
+        int excludeLeft = int.MinValue, int excludeRight = int.MinValue)
+    {
+        if (width <= 4 || height <= 4) return -1;
+
+        try
+        {
+            using var bitmap = new System.Drawing.Bitmap(width, height,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+            using (System.Drawing.Graphics graphics = System.Drawing.Graphics.FromImage(bitmap))
+            {
+                graphics.CopyFromScreen(screenLeft, screenTop, 0, 0,
+                    new System.Drawing.Size(width, height), System.Drawing.CopyPixelOperation.SourceCopy);
+            }
+
+            var data = bitmap.LockBits(new System.Drawing.Rectangle(0, 0, width, height),
+                System.Drawing.Imaging.ImageLockMode.ReadOnly,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+            try
+            {
+                int stride = data.Stride;
+                var buffer = new byte[stride * height];
+                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, buffer, 0, buffer.Length);
+
+                // 逐列算水平梯度，第一列出现明显边缘的就是图标左沿
+                for (int x = 1; x < width; x++)
+                {
+                    int screenX = screenLeft + x;
+                    if (screenX >= excludeLeft && screenX <= excludeRight) continue;
+
+                    double columnGradient = 0;
+
+                    for (int y = 0; y < height; y += 2)
+                    {
+                        int row = y * stride;
+                        int i = row + x * 4;
+                        int j = row + (x - 1) * 4;
+
+                        double a = 0.299 * buffer[i + 2] + 0.587 * buffer[i + 1] + 0.114 * buffer[i];
+                        double b = 0.299 * buffer[j + 2] + 0.587 * buffer[j + 1] + 0.114 * buffer[j];
+                        columnGradient += Math.Abs(a - b);
+                    }
+
+                    // 单列累计超过 90 基本就是字形/图标的竖直边
+                    if (columnGradient > 90) return x;
+                }
+            }
+            finally
+            {
+                bitmap.UnlockBits(data);
+            }
+        }
+        catch
+        {
+            // 采不到就回退到容器边缘
+        }
+
+        return -1;
+    }
+
+    /// <summary>
     /// 任务栏上「别人的挂件」占用的横向区间（物理像素，相对任务栏左边）。
     ///
     /// 任务栏上的挂件（FluentFlyout、各种电量条之类）大多是「窗口铺满整条任务栏 +
     /// region 裁剪」的做法，光看窗口矩形是整条任务栏，只有 region 才是真实可见范围。
     /// 标准部件（通知区域、任务视图、开始按钮、合成桥）在这里跳过。
     /// </summary>
-    public static List<(int Left, int Right, string Class)> ForeignWidgetSpans(IntPtr taskbar, IntPtr self)
+    /// <param name="selfRect">
+    /// 自己的窗口矩形（屏幕坐标）。和某块区域重叠时不再重新采样——采到的会是
+    /// 自己画出来的像素，判成「被占用」后让开，让开后采样又变空，控件就会在
+    /// 两个位置之间来回跳。这种情况下沿用上一轮的判定。
+    /// </param>
+    /// <summary>上一轮的「这块区域里到底有没有东西」判定，按窗口类名记。见下面的防抖说明。</summary>
+    private static readonly Dictionary<string, bool> _spanCache = new(StringComparer.Ordinal);
+
+    public static List<(int Left, int Right, string Class)> ForeignWidgetSpans(
+        IntPtr taskbar, IntPtr self, RECT? selfRect = null)
     {
         var spans = new List<(int, int, string)>();
         if (taskbar == IntPtr.Zero) return spans;
 
         GetWindowRect(taskbar, out RECT tb);
         int tbWidth = tb.Right - tb.Left;
-        if (tbWidth <= 0) return spans;
+        int tbHeight = tb.Bottom - tb.Top;
+        if (tbWidth <= 0 || tbHeight <= 0) return spans;
 
         var name = new StringBuilder(256);
         IntPtr child = IntPtr.Zero;
@@ -187,6 +340,29 @@ internal static class Native
 
             // 只看任务栏右半边的挂件（左边的那些不会和我们抢位置）
             if (left < tbWidth / 2) continue;
+
+            // 关键一步：region 还在不代表真的画了东西。FluentFlyout 不显示媒体时
+            // 窗口和 region 都保留着，只是内容透明。只有采样到真实像素才算占位，
+            // 否则控件会被一块看不见的区域顶开，看着就像没贴着通知区域。
+            bool overlapsSelf = selfRect is { } selfBox
+                                && selfBox.Right > b.Left && selfBox.Left < b.Right;
+
+            bool occupied;
+            if (overlapsSelf && _spanCache.TryGetValue(cls, out bool cached))
+            {
+                occupied = cached;
+            }
+            else
+            {
+                // 采任务栏中间那条带，避开边缘的圆角与阴影
+                int sampleHeight = Math.Max(4, Math.Min(b.Bottom - b.Top, tbHeight / 2));
+                int sampleY = tb.Top + (tbHeight - sampleHeight) / 2;
+
+                occupied = RegionHasContent(tb.Left + left, sampleY, width, sampleHeight);
+                if (!overlapsSelf) _spanCache[cls] = occupied;
+            }
+
+            if (!occupied) continue;
 
             spans.Add((left, right, cls));
         }

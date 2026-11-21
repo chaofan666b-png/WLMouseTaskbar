@@ -79,6 +79,15 @@ public partial class App : System.Windows.Application
         };
         _tray.TrayVisibilityChanged += () => _tray.SyncState();
 
+        // 开发用：--fake-percent 88 强制显示某个电量，方便在没有设备 / 鼠标休眠时
+        // 检查任务栏上的渲染效果（region 裁剪只有真正挂上任务栏才看得出问题）。
+        int fakeIndex = Array.IndexOf(e.Args, "--fake-percent");
+        if (fakeIndex >= 0 && fakeIndex + 1 < e.Args.Length
+            && int.TryParse(e.Args[fakeIndex + 1], out int fakePercent))
+        {
+            TaskbarWidgetWindow.DevPercentOverride = fakePercent;
+        }
+
         _battery.Updated += OnBatteryUpdated;
 
         // 首次启动就有数据，不用等一个轮询周期

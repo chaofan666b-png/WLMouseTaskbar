@@ -58,10 +58,34 @@ public partial class MainWindow : Window
         if (_page is "overview" or "device") BuildPage();
     });
 
+    /// <summary>
+    /// 设置窗口里的强调色：按电量分档（绿 / 橙 / 红），充电时蓝。
+    /// 任务栏控件是透明的，只用单色；这里是完整窗口，分档配色更有信息量。
+    /// </summary>
+    private static Color AccentFor(BatteryState state)
+    {
+        bool light = !ThemeManager.IsDark;
+
+        if (!state.DevicePresent || state.Percent is null)
+            return light ? Color.FromRgb(0x6B, 0x72, 0x80) : Color.FromRgb(0x9C, 0xA3, 0xAF);
+
+        if (state.Charging)
+            return light ? Color.FromRgb(0x25, 0x63, 0xEB) : Color.FromRgb(0x60, 0xA5, 0xFA);
+
+        int percent = state.Percent.Value;
+
+        if (percent >= 50)
+            return light ? Color.FromRgb(0x16, 0xA3, 0x4A) : Color.FromRgb(0x4A, 0xDE, 0x80);
+
+        return percent >= 20
+            ? (light ? Color.FromRgb(0xD9, 0x77, 0x06) : Color.FromRgb(0xFB, 0xBF, 0x24))
+            : (light ? Color.FromRgb(0xDC, 0x26, 0x26) : Color.FromRgb(0xF8, 0x71, 0x71));
+    }
+
     private void Apply(BatteryState state)
     {
         bool connected = state.DevicePresent && state.Percent is not null;
-        Color accent = Palette.For(state, !ThemeManager.IsDark).Accent;
+        Color accent = AccentFor(state);
         var brush = new SolidColorBrush(accent);
         brush.Freeze();
 
@@ -200,7 +224,7 @@ public partial class MainWindow : Window
         batteryPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         batteryPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        Color accent = Palette.For(state, !ThemeManager.IsDark).Accent;
+        Color accent = AccentFor(state);
 
         var big = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         big.Children.Add(new TextBlock

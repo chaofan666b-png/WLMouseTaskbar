@@ -24,6 +24,9 @@ public partial class TaskbarWidgetWindow : Window
     private static readonly TimeSpan PositionInterval = TimeSpan.FromMilliseconds(1200);
     private const double CornerRadiusDip = 7;
 
+    /// <summary>和锚点之间固定的最小间距（DIP），约等于系统托盘图标之间的空隙。</summary>
+    private const double BaseGapDip = 7;
+
     private readonly BatteryService _battery;
     private readonly AppSettings _settings;
 
@@ -32,6 +35,9 @@ public partial class TaskbarWidgetWindow : Window
 
     private IntPtr _hwnd;
     private IntPtr _taskbar;
+
+    /// <summary>上一轮胶囊的屏幕矩形，用于在像素采样时排除自己画出来的像素。</summary>
+    private Native.RECT _pillScreenRect;
     private uint _taskbarCreatedMessage;
     private bool _positioning;
     private bool _closed;
@@ -198,7 +204,10 @@ public partial class TaskbarWidgetWindow : Window
             // 量出 Pill 的内容尺寸（逻辑坐标，已含 LayoutTransform）
             Pill.Width = double.NaN;
             Pill.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            double pillW = Math.Ceiling(Pill.DesiredSize.Width);
+
+            // 留 2 DIP 余量：DesiredSize 正好等于内容宽度时，乘上 1.25 的缩放再取整，
+            // 最后一两个像素会被 SetWindowRgn 裁掉，末尾的字（例如「%」）就没了。
+            double pillW = Math.Ceiling(Pill.DesiredSize.Width) + 2;
             double pillH = Math.Ceiling(Pill.DesiredSize.Height);
             if (pillW <= 0 || pillH <= 0) return;
             Pill.Width = pillW;
@@ -222,7 +231,12 @@ public partial class TaskbarWidgetWindow : Window
             // 计算水平位置（物理像素）
             int widgetWidth = (int)Math.Round(pillW * windowScale);
             int widgetHeight = (int)Math.Round(pillH * windowScale);
-            int gap = (int)(_settings.WidgetOffset * dpi);
+            // 基础间距保证不会和锚点贴到重叠；WidgetOffset 是用户额外加的余量
+            int gap = (int)((_settings.WidgetOffset + BaseGapDip) * dpi);
+
+            // 排除「自己」时要用胶囊的屏幕矩形。窗口本身铺满整条任务栏，
+            // 拿它当排除范围等于把所有列都跳过。
+            Native.RECT selfRect = _pillScreenRect;
 
             int anchorX = tbWidth;   // 默认任务栏右端
             IntPtr tray = Native.TrayNotify(taskbar);
@@ -232,6 +246,25 @@ public partial class TaskbarWidgetWindow : Window
                 var trayPoint = new Native.POINT { X = trayRect.Left, Y = trayRect.Top };
                 Native.ScreenToClient(taskbar, ref trayPoint);
                 if (trayPoint.X > 0 && trayPoint.X < tbWidth) anchorX = trayPoint.X;
+
+                // 通知区域这个容器的左边缘比第一个图标（隐藏图标箭头）要左不少，
+                // 直接贴着容器会留一条几十像素的空隙。Windows 11 的通知区不暴露
+                // 子窗口，所以采样像素找第一列有内容的边缘，再退一点点。
+                int trayWidth = trayRect.Right - trayRect.Left;
+                int searchWidth = Math.Min(trayWidth, (int)(180 * dpi));
+                int sampleHeight = Math.Max(6, tbHeight / 2);
+                int sampleTop = tb.Top + (tbHeight - sampleHeight) / 2;
+
+                // 排除自己的窗口：它贴着通知区域，很可能已经压进扫描范围里，
+                // 不排除就会把自己的右边缘当成第一个托盘图标，锚点自己追自己。
+                int contentLeft = Native.FindTrayContentLeft(
+                    trayRect.Left, sampleTop, searchWidth, sampleHeight,
+                    selfRect.Left, selfRect.Right);
+
+                if (contentLeft > 0)
+                    anchorX = trayPoint.X + contentLeft - (int)(2 * dpi);
+
+                Diag($"tray anchor={anchorX} contentLeft={contentLeft} trayLeft={trayPoint.X}");
             }
 
             int startX = 0;          // 开始按钮右边缘
@@ -244,9 +277,10 @@ public partial class TaskbarWidgetWindow : Window
                 if (startPoint.X > 0 && startPoint.X < tbWidth) startX = startPoint.X;
             }
 
-            // 任务栏上其他挂件（FluentFlyout 的媒体控件等）占住的横向区间
+            // 任务栏上其他挂件（FluentFlyout 的媒体控件等）占住的横向区间。
+            // 把自己当前的矩形传进去，让采样避开自画像素造成的反馈。
             var spans = _settings.AvoidOtherWidgets
-                ? Native.ForeignWidgetSpans(taskbar, _hwnd)
+                ? Native.ForeignWidgetSpans(taskbar, _hwnd, selfRect)
                 : new List<(int Left, int Right, string Class)>();
 
             int xPhys = _settings.WidgetPosition switch
@@ -279,6 +313,15 @@ public partial class TaskbarWidgetWindow : Window
             // Pill 在窗口内按逻辑坐标摆放
             Canvas.SetLeft(Pill, xPhys / windowScale);
             Canvas.SetTop(Pill, yPhys / windowScale);
+
+            // 记下胶囊的屏幕矩形，下一轮采样时把自己排除掉
+            _pillScreenRect = new Native.RECT
+            {
+                Left = tb.Left + xPhys,
+                Top = tb.Top + yPhys,
+                Right = tb.Left + xPhys + widgetWidth,
+                Bottom = tb.Top + yPhys + widgetHeight,
+            };
 
             Diag($"tb={tbWidth}x{tbHeight} pill={widgetWidth}x{widgetHeight} at {xPhys},{yPhys} " +
                  $"pos={_settings.WidgetPosition} gap={gap} anchorX={anchorX} startX={startX} " +
@@ -332,38 +375,32 @@ public partial class TaskbarWidgetWindow : Window
         }, DispatcherPriority.Background);
     }
 
+    /// <summary>
+    /// 开发用：强制显示指定电量（--fake-percent），方便鼠标休眠或没接设备时
+    /// 检查任务栏上的实际渲染效果。null 表示照常显示真实读数。
+    /// </summary>
+    public static int? DevPercentOverride { get; set; }
+
     /// <summary>把电量状态画到控件上。</summary>
     private void Apply(BatteryState state)
     {
-        bool light = ThemeHelper.IsLightTaskbar();
-        Palette palette = Palette.For(state, light);
+        if (DevPercentOverride is int fake)
+            state = state with { Percent = fake, DevicePresent = true, Charging = false };
 
-        var accent = new SolidColorBrush(palette.Accent);
-        accent.Freeze();
+        Palette palette = Palette.For(ThemeHelper.IsLightTaskbar());
 
-        var soft = new SolidColorBrush(Color.FromArgb(0x8C, palette.Accent.R, palette.Accent.G, palette.Accent.B));
-        soft.Freeze();
+        // 透明底，不画任何底板：和系统自带的电量图标一样浮在任务栏上
+        Pill.Background = Brushes.Transparent;
+        Pill.BorderThickness = new Thickness(0);
 
-        var background = new SolidColorBrush(palette.Background);
-        background.Freeze();
+        var foreground = new SolidColorBrush(palette.TextPrimary);
+        foreground.Freeze();
 
-        // 卡片背景与边框：跟随系统深浅色
-        Pill.Background = background;
-        Pill.BorderBrush = new SolidColorBrush(palette.Border);
-        Pill.BorderThickness = new Thickness(1);
-
-        // 顶部高光
-        Highlight.BorderBrush = new SolidColorBrush(palette.Highlight);
-
-        // 左侧方块：强调色的浅色底，电池图形本身用强调色
-        IconTile.Background = new SolidColorBrush(palette.TileBackground);
-        Shell.BorderBrush = soft;
-        Fill.Background = accent;
-        Tip.Fill = soft;
-
-        // 文字
-        PercentText.Foreground = new SolidColorBrush(palette.TextPrimary);
-        CaptionText.Foreground = new SolidColorBrush(palette.TextPrimary);
+        Shell.BorderBrush = foreground;
+        Fill.Background = foreground;
+        Tip.Fill = foreground;
+        Bolt.Fill = foreground;
+        PercentText.Foreground = foreground;
 
         string text = state.Percent is int p ? $"{p}%" : "—";
         if (PercentText.Text != text)
@@ -373,21 +410,18 @@ public partial class TaskbarWidgetWindow : Window
             UpdatePosition();
         }
 
-        CaptionText.Text = state.DevicePresent
-            ? state.Charging
-                ? "充电中"
-                : "WL Mouse"
-            : "未连接";
-
-        // 电量液面宽度（电池外壳 17 DIP，内边距 2）
-        double inner = 13;
+        // 电量液面宽度（外壳 21 DIP，内边距 2）
+        double inner = 16;
         double ratio = state.Percent is int percent ? Math.Clamp(percent, 0, 100) / 100.0 : 0;
         Fill.Width = inner * ratio;
 
-        BoltHost.Visibility = state.Charging ? Visibility.Visible : Visibility.Collapsed;
-        BoltBack.Fill = new SolidColorBrush(palette.Background);
-        BoltBack.Stroke = new SolidColorBrush(palette.Border);
-        Bolt.Fill = accent;
+        // 充电时把液面换成闪电，和 Windows 的处理一致
+        bool charging = state.Charging && state.Percent is not null;
+        Fill.Visibility = charging ? Visibility.Collapsed : Visibility.Visible;
+        Bolt.Visibility = charging ? Visibility.Visible : Visibility.Collapsed;
+
+        // 没有设备时整体淡下去，不喧宾夺主
+        Pill.Opacity = state.DevicePresent && state.Percent is not null ? 1.0 : 0.45;
 
         Pill.ToolTip = state.DevicePresent
             ? state.Percent is int pp
@@ -493,9 +527,16 @@ public partial class TaskbarWidgetWindow : Window
         }
     }
 
-    private void Pill_MouseEnter(object sender, MouseEventArgs e) => Pill.Opacity = 1.0;
+    private void Pill_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (Pill.Opacity > 0.5) Pill.Opacity = 1.0;
+    }
 
-    private void Pill_MouseLeave(object sender, MouseEventArgs e) => Pill.Opacity = 0.92;
+    private void Pill_MouseLeave(object sender, MouseEventArgs e)
+    {
+        // 未连接时整体是淡的，别把「淡」当成常态透明度覆盖掉
+        if (Pill.Opacity > 0.5) Pill.Opacity = 0.92;
+    }
 
     private void Menu_Opened(object sender, RoutedEventArgs e)
     {
@@ -585,58 +626,18 @@ public partial class TaskbarWidgetWindow : Window
     }
 }
 
-/// <summary>控件配色。</summary>
-internal readonly record struct Palette(
-    Color Accent,
-    Color Background,
-    Color Border,
-    Color Highlight,
-    Color TileBackground,
-    Color TextPrimary)
+/// <summary>
+/// 控件配色。
+///
+/// 透明底之后只剩前景一种颜色：任务栏是深色就用白色，浅色就用近黑——和系统
+/// 托盘里那几个自带的图标（音量、网络、电池）是同一套规则。电量高低不再变色，
+/// 因为笔记本电脑的电量图标本身也不变色，变色反而和系统图标不协调。
+/// </summary>
+internal readonly record struct Palette(Color TextPrimary)
 {
-    public static Palette For(BatteryState state, bool lightTaskbar)
-    {
-        Color accent;
-        if (!state.DevicePresent || state.Percent is null)
-            accent = lightTaskbar ? Color.FromRgb(0x6B, 0x72, 0x80) : Color.FromRgb(0x9C, 0xA3, 0xAF);
-        else if (state.Charging)
-            accent = lightTaskbar ? Color.FromRgb(0x25, 0x63, 0xEB) : Color.FromRgb(0x60, 0xA5, 0xFA);
-        else
-        {
-            int p = state.Percent.Value;
-            accent = p >= 50
-                ? (lightTaskbar ? Color.FromRgb(0x16, 0xA3, 0x4A) : Color.FromRgb(0x4A, 0xDE, 0x80))
-                : p >= 20
-                    ? (lightTaskbar ? Color.FromRgb(0xD9, 0x77, 0x06) : Color.FromRgb(0xFB, 0xBF, 0x24))
-                    : (lightTaskbar ? Color.FromRgb(0xDC, 0x26, 0x26) : Color.FromRgb(0xF8, 0x71, 0x71));
-        }
-
-        // 任务栏本身可能是透明的（壁纸会透进来），所以控件自己要有足够的
-        // 不透明度，否则数字在花哨壁纸上读不清。
-        Color background = lightTaskbar
-            ? Color.FromArgb(0xE8, 0xFF, 0xFF, 0xFF)
-            : Color.FromArgb(0xE0, 0x2B, 0x2B, 0x2B);
-
-        Color border = lightTaskbar
-            ? Color.FromArgb(0x30, 0x00, 0x00, 0x00)
-            : Color.FromArgb(0x28, 0xFF, 0xFF, 0xFF);
-
-        // 顶部高光：FluentFlyout 的 TopBorder 用的是白色低透明度细线
-        Color highlight = lightTaskbar
-            ? Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF)
-            : Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF);
-
-        // 左侧方块底色：强调色淡淡的染色，和卡片的纯色底区分开
-        Color tile = lightTaskbar
-            ? Color.FromArgb(0x14, accent.R, accent.G, accent.B)
-            : Color.FromArgb(0x1E, accent.R, accent.G, accent.B);
-
-        Color textPrimary = lightTaskbar
-            ? Color.FromArgb(0xE4, 0x00, 0x00, 0x00)
-            : Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
-
-        return new Palette(accent, background, border, highlight, tile, textPrimary);
-    }
+    public static Palette For(bool lightTaskbar) => new(lightTaskbar
+        ? Color.FromArgb(0xE4, 0x00, 0x00, 0x00)
+        : Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF));
 }
 
 /// <summary>从注册表读取任务栏（系统）深浅色。</summary>
