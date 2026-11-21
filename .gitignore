@@ -15,3 +15,6 @@ WL_MOUSE_HUB-*.exe
 
 # 调试符号
 *.pdb
+
+# 自包含发布产物（仅用于 GitHub Release 附件，不进版本库）
+dist-sc/

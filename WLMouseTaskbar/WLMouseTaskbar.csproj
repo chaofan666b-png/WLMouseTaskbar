@@ -15,9 +15,12 @@
     <RootNamespace>WLMouseTaskbar</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.1.0</Version>
+    <Version>1.0.0</Version>
     <Product>WL Mouse 任务栏电量</Product>
     <AssemblyTitle>WL Mouse 任务栏电量</AssemblyTitle>
+    <Description>在 Windows 任务栏上显示 WLmouse 鼠标电量，并可调整 DPI、回报率等设备设置。</Description>
+    <!-- 单文件发布时把依赖的语言资源裁掉，体积能小一半以上 -->
+    <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>
     <!-- WPF 的 PerMonitorV2 由 app.manifest 声明，WinForms 的 WFO0003 提示不适用 -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
