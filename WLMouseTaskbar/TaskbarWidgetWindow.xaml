@@ -1,0 +1,76 @@
+<Window x:Class="WLMouseTaskbar.TaskbarWidgetWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WLMouseTaskbarWidget"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        Topmost="False"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="ClearType">
+
+    <!--
+        窗口本身铺满整个任务栏，再用 SetWindowRgn 只保留 Pill 那块可见。
+        这是 FluentFlyout 的做法：小尺寸的 WS_EX_LAYERED 子窗口，其合成表面
+        会被丢弃导致完全不显示；铺满整条任务栏才稳定。
+    -->
+    <Canvas x:Name="Root" Background="Transparent">
+
+        <Border x:Name="Pill"
+                Height="26"
+                CornerRadius="7"
+                Padding="8,0"
+                MouseEnter="Pill_MouseEnter"
+                MouseLeave="Pill_MouseLeave"
+                MouseLeftButtonUp="Pill_MouseLeftButtonUp"
+                MouseRightButtonUp="Pill_MouseRightButtonUp">
+            <Border.ContextMenu>
+                <ContextMenu x:Name="Menu" Opened="Menu_Opened">
+                    <MenuItem x:Name="MenuBattery" Header="电量：—" IsEnabled="False" />
+                    <Separator />
+                    <MenuItem Header="立即刷新" Click="MenuRefresh_Click" />
+                    <MenuItem Header="设备信息…" Click="MenuDetails_Click" />
+                    <Separator />
+                    <MenuItem x:Name="MenuSettings" Header="设置…" Click="MenuSettings_Click" />
+                    <MenuItem Header="在通知区显示图标" x:Name="MenuTrayToggle"
+                              IsCheckable="True" IsChecked="True" Click="MenuTrayToggle_Click" />
+                    <Separator />
+                    <MenuItem Header="退出" Click="MenuExit_Click" />
+                </ContextMenu>
+            </Border.ContextMenu>
+
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+
+                <!-- 电池图标：外壳 + 按电量填充的液面 + 右侧电极 -->
+                <Grid Width="19" Height="11" Margin="0,0,4,0" VerticalAlignment="Center">
+                    <Border x:Name="Shell" BorderThickness="1.1" CornerRadius="2.2" />
+                    <Border x:Name="Fill" CornerRadius="1.1"
+                            HorizontalAlignment="Left" Margin="2" Width="0" />
+                    <Rectangle x:Name="Tip" Width="1.8" Height="4.2"
+                               HorizontalAlignment="Right" VerticalAlignment="Center"
+                               Margin="0,0,-2.6,0" RadiusX="0.9" RadiusY="0.9" />
+                </Grid>
+
+                <TextBlock x:Name="PercentText" Text="—"
+                           FontFamily="Segoe UI"
+                           FontSize="11.5" FontWeight="SemiBold"
+                           VerticalAlignment="Center" />
+
+                <!-- 充电闪电：只在充电时出现并参与布局 -->
+                <Grid x:Name="BoltHost" Margin="3,0,0,0" VerticalAlignment="Center"
+                      Visibility="Collapsed">
+                    <Path x:Name="Bolt" Width="7" Height="10"
+                          Stretch="Uniform"
+                          Data="M3,0 L0,6 L2.6,6 L1.4,10 L5.6,3.6 L3,3.6 L4.6,0 Z" />
+                </Grid>
+            </StackPanel>
+        </Border>
+    </Canvas>
+</Window>

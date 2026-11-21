@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>WLMouseTray</AssemblyName>
+    <RootNamespace>WLMouseTray</RootNamespace>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+    <Product>WL Mouse 电量托盘</Product>
+    <AssemblyTitle>WL Mouse 电量托盘</AssemblyTitle>
+    <!-- Probe 是独立命令行调试项目，不参与主程序编译 -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);Probe/**;dist/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+</Project>

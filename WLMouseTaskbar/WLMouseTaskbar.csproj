@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!--
+      WPF 与 WinForms 同时开启时，两套隐式 using 会让 Color / Point / Size / Application
+      等类型产生 CS0104 二义性，所以这里关掉隐式 using，用 GlobalUsings.cs 精确控制。
+    -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>WLMouseTaskbar</AssemblyName>
+    <RootNamespace>WLMouseTaskbar</RootNamespace>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.1.0</Version>
+    <Product>WL Mouse 任务栏电量</Product>
+    <AssemblyTitle>WL Mouse 任务栏电量</AssemblyTitle>
+    <!-- WPF 的 PerMonitorV2 由 app.manifest 声明，WinForms 的 WFO0003 提示不适用 -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 直接复用 WLMouseTray 里已实测可用的 HID 协议实现 -->
+    <Compile Include="..\WLMouseTray\Hid.cs" Link="Shared\Hid.cs" />
+    <Compile Include="..\WLMouseTray\WlMouse.cs" Link="Shared\WlMouse.cs" />
+  </ItemGroup>
+
+</Project>

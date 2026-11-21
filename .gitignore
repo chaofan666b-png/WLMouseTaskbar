@@ -1,0 +1,17 @@
+# 构建产物
+bin/
+obj/
+*.user
+*.suo
+
+# 官方驱动安装包（122 MB，属于厂商软件，不纳入版本库）
+WL_MOUSE_HUB-*.exe
+
+# 本机 Claude Code 设置
+.claude/
+
+# 临时的 PNG 快照 / 诊断输出
+*.error.txt
+
+# 调试符号
+*.pdb
