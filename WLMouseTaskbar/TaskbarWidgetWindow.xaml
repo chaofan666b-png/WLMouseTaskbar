@@ -56,16 +56,24 @@
                         VerticalAlignment="Center"
                         HorizontalAlignment="Left">
 
-                <!-- 电池：外壳 + 按电量填充的液面 + 右侧电极；充电时液面换成闪电 -->
-                <Grid Width="21" Height="11" VerticalAlignment="Center">
-                    <Border x:Name="Shell" BorderThickness="1.3" CornerRadius="2.6" />
-                    <Border x:Name="Fill" CornerRadius="1.2"
-                            HorizontalAlignment="Left" Margin="2" Width="0" />
-                    <Rectangle x:Name="Tip" Width="1.9" Height="4.2"
+                <!--
+                    电池：外壳 + 按电量填充的液面 + 右侧电极；充电时液面换成闪电。
+
+                    Fill 的左右内缩 1.9（= 外壳描边 1.3 + 0.6 的缝隙），上下内缩 1.5。
+                    这样它到外壳内壁的距离上下左右一致，看起来是「灌满到底」而不是
+                    中间浮着一条。宽度基数必须等于「22 - 2×1.9 = 18.2」，
+                    代码里 FillWidthBase 就是它——基数写大了会造成高电量时也显得不满。
+                -->
+                <Grid Width="22" Height="12" VerticalAlignment="Center">
+                    <Border x:Name="Shell" BorderThickness="1.3" CornerRadius="2.8" />
+                    <Border x:Name="Fill" CornerRadius="1.4"
+                            HorizontalAlignment="Left" VerticalAlignment="Stretch"
+                            Margin="1.9,1.5,1.9,1.5" Width="0" />
+                    <Rectangle x:Name="Tip" Width="2" Height="4.6"
                                HorizontalAlignment="Right" VerticalAlignment="Center"
-                               Margin="0,0,-2.8,0" RadiusX="0.95" RadiusY="0.95" />
+                               Margin="0,0,-2.9,0" RadiusX="1" RadiusY="1" />
                     <Path x:Name="Bolt"
-                          Width="6" Height="8.5"
+                          Width="6.5" Height="9"
                           Stretch="Uniform"
                           HorizontalAlignment="Center" VerticalAlignment="Center"
                           Visibility="Collapsed"

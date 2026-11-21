@@ -1,0 +1,71 @@
+<Window x:Class="WLMouseTaskbar.LowBatteryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="低电量提示"
+        Width="248" Height="58"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        Topmost="True"
+        UseLayoutRounding="True"
+        FontFamily="Microsoft YaHei UI"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="ClearType">
+
+    <!--
+        仿 FluentFlyout 的 LockWindow（大写锁定提示）：
+        一张圆角小卡片，左边图标、右边文字，底部一条强调色指示条，从下往上滑出、
+        停留几秒后淡出。位置在任务栏正上方靠通知区域那一侧。
+    -->
+    <Border x:Name="Card"
+            CornerRadius="8"
+            BorderThickness="1"
+            Background="{DynamicResource FlyoutBackground}"
+            BorderBrush="{DynamicResource CardStroke}">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.28" Color="Black" />
+        </Border.Effect>
+
+        <Grid>
+            <Grid Margin="14,0,14,10" VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- 低电量电池图形：左边一截红色，右边空槽 -->
+                <Grid Grid.Column="0" Width="30" Height="15" VerticalAlignment="Center">
+                    <Border x:Name="Shell" BorderThickness="1.6" CornerRadius="3.4" />
+                    <Border x:Name="Fill" CornerRadius="1.8"
+                            HorizontalAlignment="Left" VerticalAlignment="Stretch"
+                            Margin="2,2,2,2" Width="0" />
+                    <Rectangle x:Name="Tip" Width="2.4" Height="5.6"
+                               HorizontalAlignment="Right" VerticalAlignment="Center"
+                               Margin="0,0,-3.4,0" RadiusX="1.2" RadiusY="1.2" />
+                </Grid>
+
+                <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                    <TextBlock x:Name="TitleText" Text="鼠标电量偏低"
+                               FontSize="13.5" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimary}"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="DetailText" Text="剩余 19%，请及时充电"
+                               FontSize="11.5" Margin="0,2,0,0"
+                               Foreground="{DynamicResource TextSecondary}"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Grid>
+
+            <!-- 底部指示条：宽度按电量，颜色随档位 -->
+            <Rectangle x:Name="Indicator"
+                       Height="3" Width="60"
+                       RadiusX="1.5" RadiusY="1.5"
+                       HorizontalAlignment="Left"
+                       VerticalAlignment="Bottom"
+                       Margin="14,0,0,6" />
+        </Grid>
+    </Border>
+</Window>

@@ -27,6 +27,12 @@ public partial class TaskbarWidgetWindow : Window
     /// <summary>和锚点之间固定的最小间距（DIP），约等于系统托盘图标之间的空隙。</summary>
     private const double BaseGapDip = 7;
 
+    /// <summary>
+    /// 电量液面能占的最大宽度（DIP）。= 电池外壳宽度 22 - 左右内缩各 1.9，
+    /// 必须和 XAML 里 Fill 的 Margin 对得上，否则满电时也填不满。
+    /// </summary>
+    private const double FillWidthBase = 22 - 1.9 * 2;
+
     private readonly BatteryService _battery;
     private readonly AppSettings _settings;
 
@@ -410,10 +416,9 @@ public partial class TaskbarWidgetWindow : Window
             UpdatePosition();
         }
 
-        // 电量液面宽度（外壳 21 DIP，内边距 2）
-        double inner = 16;
+        // 电量液面宽度：基数 = 外壳宽度 22 - 左右各 1.9 的内缩
         double ratio = state.Percent is int percent ? Math.Clamp(percent, 0, 100) / 100.0 : 0;
-        Fill.Width = inner * ratio;
+        Fill.Width = FillWidthBase * ratio;
 
         // 充电时把液面换成闪电，和 Windows 的处理一致
         bool charging = state.Charging && state.Percent is not null;
@@ -576,7 +581,10 @@ public partial class TaskbarWidgetWindow : Window
         }
 
         MenuPolling.Items.Clear();
-        int[] rates = PollingRates.All;
+        int maxHz = PollingRates.MaxFor(config.ProductId);
+        int[] rates = PollingRates.All.Where(hz => hz <= maxHz).ToArray();
+        if (rates.Length == 0) rates = PollingRates.All;
+
         foreach (int hz in rates)
         {
             int value = hz;

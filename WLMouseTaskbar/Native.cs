@@ -16,6 +16,7 @@ internal static class Native
     public const int WS_CHILD = 0x40000000;
     public const int WS_POPUP = unchecked((int)0x80000000);
     public const int WS_EX_NOACTIVATE = 0x08000000;
+    public const int WS_EX_TOOLWINDOW = 0x00000080;
 
     public const int WM_GETOBJECT = 0x003D;
     public const int WM_SHOWWINDOW = 0x0018;

@@ -394,8 +394,9 @@ public partial class MainWindow : Window
         // ---- 回报率 ----
         panel.Children.Add(Ui.Section("回报率"));
 
-        // 只列出接收器实际能跑的档位：8K 接收器才有 4000/8000
-        int[] rates = PollingRates.All.Where(hz => hz <= MaxPollingFor(config)).ToArray();
+        // 按型号放开档位：1K 接收器只到 1000 Hz，其余全部列出（见 PollingRates.MaxFor）
+        int maxHz = PollingRates.MaxFor(config.ProductId);
+        int[] rates = PollingRates.All.Where(hz => hz <= maxHz).ToArray();
         if (rates.Length == 0) rates = PollingRates.All;
 
         panel.Children.Add(Ui.Card(
@@ -403,6 +404,20 @@ public partial class MainWindow : Window
                 Ui.Combo(rates, config.PollingRateHz ?? rates[^1],
                     hz => Change(c => c.SetPollingRate(hz), $"回报率设为 {hz} Hz"),
                     hz => $"{hz} Hz"))));
+
+        // 8K 接收器要接在 USB 3.0 及以上、且别经过 Hub，否则跑不满
+        if (maxHz > 1000)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = "4000 / 8000 Hz 需要接收器直插 USB 3.0 及以上接口；" +
+                       "经过 USB Hub 或前置面板时常会自动降到 2000 Hz 以下。",
+                FontSize = 12,
+                Foreground = Ui.Res("TextSecondary"),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(2, 8, 0, 0),
+            });
+        }
 
         // ---- 传感器 ----
         panel.Children.Add(Ui.Section("传感器"));
@@ -462,10 +477,6 @@ public partial class MainWindow : Window
 
         return panel;
     }
-
-    /// <summary>按接收器型号猜最大回报率。读不到时按 8000 放开，由鼠标自己拒绝。</summary>
-    private static int MaxPollingFor(MouseConfig config) =>
-        config.PollingRateHz is int hz && hz > 0 ? Math.Max(hz, 1000) : 8000;
 
     // ---- 任务栏显示 ----
 
@@ -530,6 +541,18 @@ public partial class MainWindow : Window
             "任务栏上别的挂件（例如 FluentFlyout 的媒体控件）会占住通知区域左侧，调大这个值把本控件往左错开。",
             offsetLabel,
             offsetSlider)));
+
+        panel.Children.Add(Ui.Section("低电量提醒"));
+
+        panel.Children.Add(Ui.Card(
+            Ui.Row("电量偏低时弹窗提示",
+                "电量跌破阈值时，在任务栏上方弹出一张小卡片，样式仿系统的大写锁定提示。",
+                Toggle(_settings.LowBatteryAlert, on => UpdateSettings(s => s.LowBatteryAlert = on))),
+            Ui.Row("提醒阈值", "低于这个百分比才会提醒，充上电后重新计数。",
+                Ui.Combo(new[] { 10, 15, 20, 25, 30 },
+                    _settings.LowBatteryThreshold,
+                    value => UpdateSettings(s => s.LowBatteryThreshold = value),
+                    value => $"{value}%"))));
 
         panel.Children.Add(Ui.Section("刷新"));
 

@@ -13,6 +13,10 @@ public partial class App : System.Windows.Application
     private AppSettings _settings = new();
     private bool _openSettingsOnStart;
 
+    private LowBatteryWindow? _lowBattery;
+    private bool _lowBatteryArmed = true;
+    private DateTime _lastLowBatteryAt = DateTime.MinValue;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -78,6 +82,22 @@ public partial class App : System.Windows.Application
             _widget.RefreshNow();
         };
         _tray.TrayVisibilityChanged += () => _tray.SyncState();
+
+        // 开发用：--test-alert 15 直接弹一次低电量提示，用来检查提示窗外观
+        int alertIndex = Array.IndexOf(e.Args, "--test-alert");
+        if (alertIndex >= 0)
+        {
+            int percent = alertIndex + 1 < e.Args.Length
+                          && int.TryParse(e.Args[alertIndex + 1], out int p) ? p : 15;
+
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            ThemeManager.Apply();
+
+            var preview = new LowBatteryWindow();
+            preview.Closed += (_, _) => Shutdown();
+            preview.Show(new BatteryState(true, percent, false, null, null, "", null, DateTime.Now), 20);
+            return;
+        }
 
         // 开发用：--fake-percent 88 强制显示某个电量，方便在没有设备 / 鼠标休眠时
         // 检查任务栏上的渲染效果（region 裁剪只有真正挂上任务栏才看得出问题）。
@@ -164,7 +184,50 @@ public partial class App : System.Windows.Application
         {
             _tray?.Update(state);
             _widget?.SyncMenuState();
+            MaybeShowLowBattery(state);
         }, DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// 电量跌破阈值时弹一次提示。
+    ///
+    /// 「弹一次」的判定要防住两种刷屏：电量在阈值附近来回跳（每次都弹），
+    /// 以及程序启动时本来就很低（一开机就弹）。所以只在**从健康跨到偏低**时弹，
+    /// 并且加一个冷却时间；充上电或回到阈值以上就重新武装。
+    /// </summary>
+    private void MaybeShowLowBattery(BatteryState state)
+    {
+        if (!_settings.LowBatteryAlert) return;
+        if (!state.DevicePresent || state.Percent is not int percent) return;
+
+        int threshold = Math.Clamp(_settings.LowBatteryThreshold, 1, 99);
+
+        if (state.Charging || percent >= threshold)
+        {
+            _lowBatteryArmed = true;
+            return;
+        }
+
+        if (!_lowBatteryArmed) return;
+        if (DateTime.Now - _lastLowBatteryAt < TimeSpan.FromMinutes(30)) return;
+
+        _lowBatteryArmed = false;
+        _lastLowBatteryAt = DateTime.Now;
+
+        // WPF 关闭过的窗口不能再 Show，所以每次新建一个
+        LowBatteryWindow? previous = _lowBattery;
+        var window = new LowBatteryWindow();
+
+        window.Closed += (_, _) =>
+        {
+            // 只清理自己，别把后来新建的那个也抹掉
+            if (ReferenceEquals(_lowBattery, window)) _lowBattery = null;
+        };
+
+        _lowBattery = window;
+        previous?.Close();
+
+        window.Show(state, threshold);
     }
 
     private void OpenStatusWindow()

@@ -28,6 +28,12 @@ public sealed class AppSettings
     /// <summary>未连接鼠标时是否隐藏控件。</summary>
     public bool HideWhenDisconnected { get; set; }
 
+    /// <summary>电量跌破阈值时弹出提示卡片。</summary>
+    public bool LowBatteryAlert { get; set; } = true;
+
+    /// <summary>低电量提示的触发阈值（百分比）。</summary>
+    public int LowBatteryThreshold { get; set; } = 20;
+
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private static string Dir => Path.Combine(

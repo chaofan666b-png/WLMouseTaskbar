@@ -5,6 +5,15 @@ public static class PollingRates
 {
     public static readonly int[] All = { 125, 250, 500, 1000, 2000, 4000, 8000 };
 
+    /// <summary>
+    /// 型号支持的最高回报率。只有 1K 接收器（0xA882）限死 1000 Hz，其余型号都按
+    /// 8000 放开——具体能跑多高由鼠标自己决定，不支持的档位写入后读回校验会失败。
+    ///
+    /// 注意这里**不能**用「当前回报率」去推断上限：鼠标当前跑 2000 Hz 不代表它
+    /// 只支持 2000 Hz，那样会把 4K / 8K 选项从菜单里整个藏掉。
+    /// </summary>
+    public static int MaxFor(ushort productId) => productId == 0xA882 ? 1000 : 8000;
+
     public static byte Encode(int hz) => hz switch
     {
         125 => 0x08,
@@ -42,6 +51,9 @@ public enum LiftOffDistance
 public sealed record MouseConfig
 {
     public int Profile { get; init; } = 1;
+
+    /// <summary>接收器 / 鼠标的 PID，用来判断型号能力（例如最高回报率）。</summary>
+    public ushort ProductId { get; init; }
 
     /// <summary>DPI 档位（只取 X 轴；未开独立轴时 X 与 Y 相同）。</summary>
     public int[] DpiStages { get; init; } = Array.Empty<int>();
@@ -94,7 +106,7 @@ public sealed class MouseConfigClient
     public MouseConfig Read()
     {
         int profile = ReadActiveProfile();
-        var config = new MouseConfig { Profile = profile };
+        var config = new MouseConfig { Profile = profile, ProductId = _device.Pid };
 
         config = config with
         {
