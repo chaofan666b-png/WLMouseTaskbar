@@ -46,6 +46,19 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // 开发用：--shot-alert <png 路径> [--alert-percent 15]
+        // 把低电量提示窗渲染成 PNG（不显示在屏幕上），用于文档和宣传素材。
+        int shotAlertIndex = Array.IndexOf(e.Args, "--shot-alert");
+        if (shotAlertIndex >= 0 && shotAlertIndex + 1 < e.Args.Length)
+        {
+            int percentIndex = Array.IndexOf(e.Args, "--alert-percent");
+            int percent = percentIndex >= 0 && percentIndex + 1 < e.Args.Length
+                          && int.TryParse(e.Args[percentIndex + 1], out int v) ? v : 15;
+
+            RunAlertSnapshot(e.Args[shotAlertIndex + 1], percent);
+            return;
+        }
+
         _instanceMutex = new Mutex(true, @"Local\WLMouseTaskbar.SingleInstance", out bool isFirst);
         if (!isFirst)
         {
@@ -168,6 +181,31 @@ public partial class App : System.Windows.Application
             window.UpdateLayout();
 
             window.RenderTo(path);
+            window.Close();
+            Shutdown();
+        }
+        catch (Exception ex)
+        {
+            File.WriteAllText(path + ".error.txt", ex.ToString());
+            Shutdown(-1);
+        }
+    }
+
+    /// <summary>把低电量提示窗渲染成 PNG（不显示在屏幕上）。</summary>
+    private void RunAlertSnapshot(string path, int percent)
+    {
+        try
+        {
+            ThemeManager.Apply(true);
+
+            var state = new BatteryState(true, percent, false, null, null, "", null, DateTime.Now);
+            var window = new LowBatteryWindow();
+
+            window.PrepareSnapshot(state, percent);
+            window.Show();
+            window.UpdateLayout();
+            window.RenderTo(path);
+
             window.Close();
             Shutdown();
         }

@@ -62,8 +62,8 @@ public partial class LowBatteryWindow : Window
         return IntPtr.Zero;
     }
 
-    /// <summary>显示一条提示。重复调用会重新计时，不会叠出多个窗口。</summary>
-    public void Show(BatteryState state, int threshold)
+    /// <summary>按电量把文字、颜色和图形画到卡片上。显示与截图共用这一份逻辑。</summary>
+    private void ApplyContent(BatteryState state, int threshold)
     {
         int percent = state.Percent ?? 0;
 
@@ -74,9 +74,6 @@ public partial class LowBatteryWindow : Window
 
         var accentBrush = new SolidColorBrush(accent);
         accentBrush.Freeze();
-
-        var soft = new SolidColorBrush(Color.FromArgb(0x66, accent.R, accent.G, accent.B));
-        soft.Freeze();
 
         TitleText.Text = percent < 10 ? "鼠标电量即将耗尽" : "鼠标电量偏低";
         DetailText.Text = $"剩余 {percent}%，请及时充电";
@@ -90,7 +87,12 @@ public partial class LowBatteryWindow : Window
         Fill.Width = Math.Max(1.5, inner * Math.Clamp(percent, 0, 100) / 100.0);
         Indicator.Fill = accentBrush;
         Indicator.Width = Math.Max(24, 60 * Math.Clamp(percent, 0, 100) / 100.0);
+    }
 
+    /// <summary>显示一条提示。重复调用会重新计时，不会叠出多个窗口。</summary>
+    public void Show(BatteryState state, int threshold)
+    {
+        ApplyContent(state, threshold);
         PlaceAboveTaskbar();
 
         Opacity = 0;
@@ -107,6 +109,42 @@ public partial class LowBatteryWindow : Window
         _timer.Stop();
         _timer.Interval = TimeSpan.FromMilliseconds(ShowMs + HoldMs);
         _timer.Start();
+    }
+
+    /// <summary>
+    /// 开发用：把卡片按给定状态摆好但不播动画、不显示，供 --shot-alert 渲染成图片。
+    /// 复用 Show() 里的绘制逻辑，避免截图和实际显示不一致。
+    /// </summary>
+    public void PrepareSnapshot(BatteryState state, int threshold)
+    {
+        ApplyContent(state, threshold);
+
+        Width = 248;
+        Height = 58;
+        Opacity = 1;
+        UpdateLayout();
+    }
+
+    /// <summary>用 RenderTargetBitmap 把窗口内容渲染成 PNG。</summary>
+    public void RenderTo(string path, double scale = 3)
+    {
+        if (Content is not FrameworkElement root) return;
+
+        root.Measure(new Size(ActualWidth, ActualHeight));
+        root.Arrange(new Rect(0, 0, ActualWidth, ActualHeight));
+        root.UpdateLayout();
+
+        var target = new System.Windows.Media.Imaging.RenderTargetBitmap(
+            (int)(ActualWidth * scale), (int)(ActualHeight * scale),
+            96 * scale, 96 * scale,
+            PixelFormats.Pbgra32);
+
+        target.Render(root);
+
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(target));
+        using FileStream fs = File.Create(path);
+        encoder.Save(fs);
     }
 
     /// <summary>摆在主屏任务栏上方、靠通知区域那一侧，和提示的来源呼应。</summary>
