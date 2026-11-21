@@ -13,6 +13,7 @@
 | 右键：刷新 / 开机自启 / 退出 | ✅ 已实现 |
 | 详情窗口（固件版本、原始回包、调试日志） | ✅ 已实现 |
 | **真正读到电量数值** | ✅ 已实现（`00 A1 00 02 02 00 83 00 5A` → 90%） |
+| DPI / 回报率 / 抬升高度等配置读写 | ✅ 已实现（`MouseConfig.cs`，见下） |
 
 ## 这是怎么做到的
 
@@ -44,6 +45,41 @@
 3. 详情窗口里的「调试日志 / 最近回包」会显示每次的原始回包，便于判断
 4. 若官方 WL MOUSE HUB 此时也读不到电量，即可确认是硬件连线问题而非程序问题
 
+## 配置页协议（DPI / 回报率等）
+
+电量用的是「设备页」，配置用的是「配置页」，帧结构相同，只有页号不同：
+
+```
+缓冲区[3] = 目标（鼠标 2 / 接收器 0）
+缓冲区[4] = 长度
+缓冲区[5] = 页号   ← 0 = 设备页，1 = 配置页，3 = 按键页
+缓冲区[6] = 命令码
+缓冲区[7..] = 参数
+```
+
+`MouseConfig.cs` 封装了读写的全部细节。几个要点：
+
+- **所有配置页命令的第一个参数都是「当前生效的板载配置档」**，由设备页 `0x85` 读出。
+  写到别的档位会被静默忽略，所以每次写之前都要重新读一次。
+- 写操作**一律先写后读校验**。鼠标对越界值是静默拒绝的，不看回包就当成功会骗自己。
+- DPI 表整张一次写回：`[档数, xHi xLo yHi yLo, ...]`，共 6 档。
+- 抬升高度编码：`0x87` = 低、`0x01` = 中、`0x02` = 高；带 `0x80` 位的是 0.1 mm 精度的值。
+- 回报率编码：`0x08`=125、`0x04`=250、`0x02`=500、`0x01`/`0x10`=1000、
+  `0x20`=2000、`0x40`=4000、`0x80`=8000。
+
+`Probe` 可以直接改值来验证：
+
+```bash
+cd WLMouseTray/Probe
+dotnet run -- set polling 4000
+dotnet run -- set dpi 1 1600
+dotnet run -- set lod High
+dotnet run -- set snap on
+```
+
+协议细节参考 [OpenMouse-Project/mouse-protocol](https://github.com/OpenMouse-Project/mouse-protocol)
+里对 WLmouse 的 compx 逆向。
+
 ## 目录结构
 
 ```
@@ -51,7 +87,8 @@ WLMouseTray/
 ├── WLMouseTray.csproj     主程序（WinForms 托盘，net9.0-windows）
 ├── Program.cs             托盘图标 / 菜单 / 轮询 / 详情窗口
 ├── Hid.cs                 HID 枚举与 Feature Report 收发（P/Invoke hid.dll）
-├── WlMouse.cs             WLmouse 私有协议封装
+├── WlMouse.cs             WLmouse 私有协议封装（电量 / 固件 / 通用命令）
+├── MouseConfig.cs         配置页读写（DPI、回报率、抬升高度、去抖、休眠…）
 ├── app.ico                程序图标（脚本生成的电池图标）
 ├── Probe/                 命令行诊断工具（dotnet run 可看原始回包）
 └── dist/WLMouseTray.exe   发布产物（单文件，约 200 KB，需 .NET 9 桌面运行时）

@@ -18,13 +18,16 @@
         窗口本身铺满整个任务栏，再用 SetWindowRgn 只保留 Pill 那块可见。
         这是 FluentFlyout 的做法：小尺寸的 WS_EX_LAYERED 子窗口，其合成表面
         会被丢弃导致完全不显示；铺满整条任务栏才稳定。
+
+        外观也照 FluentFlyout 的 Taskbar Widget：40px 高的圆角卡片、顶部一道
+        高光、左边一个 36×36 的圆角方块、右边两行文字（主标题 + 次要说明）。
     -->
     <Canvas x:Name="Root" Background="Transparent">
 
         <Border x:Name="Pill"
-                Height="26"
-                CornerRadius="7"
-                Padding="8,0"
+                Height="32"
+                CornerRadius="6"
+                Padding="0,0,10,0"
                 MouseEnter="Pill_MouseEnter"
                 MouseLeave="Pill_MouseLeave"
                 MouseLeftButtonUp="Pill_MouseLeftButtonUp"
@@ -33,10 +36,11 @@
                 <ContextMenu x:Name="Menu" Opened="Menu_Opened">
                     <MenuItem x:Name="MenuBattery" Header="电量：—" IsEnabled="False" />
                     <Separator />
-                    <MenuItem Header="立即刷新" Click="MenuRefresh_Click" />
-                    <MenuItem Header="设备信息…" Click="MenuDetails_Click" />
+                    <MenuItem x:Name="MenuDpi" Header="DPI" />
+                    <MenuItem x:Name="MenuPolling" Header="回报率" />
                     <Separator />
-                    <MenuItem x:Name="MenuSettings" Header="设置…" Click="MenuSettings_Click" />
+                    <MenuItem Header="立即刷新" Click="MenuRefresh_Click" />
+                    <MenuItem Header="设置…" Click="MenuSettings_Click" />
                     <MenuItem Header="在通知区显示图标" x:Name="MenuTrayToggle"
                               IsCheckable="True" IsChecked="True" Click="MenuTrayToggle_Click" />
                     <Separator />
@@ -44,33 +48,63 @@
                 </ContextMenu>
             </Border.ContextMenu>
 
-            <StackPanel Orientation="Horizontal"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center">
+            <Grid>
+                <!-- 顶部高光，和 FluentFlyout 的 TopBorder 同一手法 -->
+                <Border x:Name="Highlight"
+                        BorderThickness="0,1.2,0,0"
+                        CornerRadius="5"
+                        Margin="1,0,1,1"
+                        IsHitTestVisible="False" />
 
-                <!-- 电池图标：外壳 + 按电量填充的液面 + 右侧电极 -->
-                <Grid Width="19" Height="11" Margin="0,0,4,0" VerticalAlignment="Center">
-                    <Border x:Name="Shell" BorderThickness="1.1" CornerRadius="2.2" />
-                    <Border x:Name="Fill" CornerRadius="1.1"
-                            HorizontalAlignment="Left" Margin="2" Width="0" />
-                    <Rectangle x:Name="Tip" Width="1.8" Height="4.2"
-                               HorizontalAlignment="Right" VerticalAlignment="Center"
-                               Margin="0,0,-2.6,0" RadiusX="0.9" RadiusY="0.9" />
-                </Grid>
+                <!-- 左边：圆角方块里的电池图形 -->
+                <Border x:Name="IconTile"
+                        Width="26" Height="26"
+                        CornerRadius="5"
+                        Margin="3,0,0,0"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        IsHitTestVisible="False">
+                    <Grid Width="17" Height="10">
+                        <Border x:Name="Shell" BorderThickness="1.2" CornerRadius="2.2" />
+                        <Border x:Name="Fill" CornerRadius="1.1"
+                                HorizontalAlignment="Left" Margin="2" Width="0" />
+                        <Rectangle x:Name="Tip" Width="1.8" Height="4"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"
+                                   Margin="0,0,-2.6,0" RadiusX="0.9" RadiusY="0.9" />
+                    </Grid>
+                </Border>
 
-                <TextBlock x:Name="PercentText" Text="—"
-                           FontFamily="Segoe UI"
-                           FontSize="11.5" FontWeight="SemiBold"
-                           VerticalAlignment="Center" />
+                <!-- 右边两行：电量 + 设备名 / 状态 -->
+                <StackPanel x:Name="TextStack"
+                            Orientation="Vertical"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center"
+                            Margin="34,0,0,0"
+                            IsHitTestVisible="False">
+                    <TextBlock x:Name="PercentText" Text="—"
+                               FontFamily="Segoe UI Variable Display, Segoe UI"
+                               FontSize="13" FontWeight="SemiBold"
+                               LineHeight="15" />
+                    <TextBlock x:Name="CaptionText" Text="WL Mouse"
+                               FontFamily="Segoe UI Variable Display, Segoe UI"
+                               FontSize="10" FontWeight="Normal"
+                               LineHeight="12"
+                               Opacity="0.62" />
+                </StackPanel>
 
-                <!-- 充电闪电：只在充电时出现并参与布局 -->
-                <Grid x:Name="BoltHost" Margin="3,0,0,0" VerticalAlignment="Center"
+                <!-- 充电闪电：贴在方块右下角 -->
+                <Grid x:Name="BoltHost"
+                      Width="13" Height="13"
+                      HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                      Margin="18,0,0,1"
+                      IsHitTestVisible="False"
                       Visibility="Collapsed">
-                    <Path x:Name="Bolt" Width="7" Height="10"
+                    <Ellipse x:Name="BoltBack" />
+                    <Path x:Name="Bolt" Width="6.5" Height="9"
                           Stretch="Uniform"
                           Data="M3,0 L0,6 L2.6,6 L1.4,10 L5.6,3.6 L3,3.6 L4.6,0 Z" />
                 </Grid>
-            </StackPanel>
+            </Grid>
         </Border>
     </Canvas>
 </Window>

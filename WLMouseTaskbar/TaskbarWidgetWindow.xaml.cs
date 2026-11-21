@@ -26,6 +26,8 @@ public partial class TaskbarWidgetWindow : Window
 
     private readonly BatteryService _battery;
     private readonly AppSettings _settings;
+
+    // 菜单里 DPI / 回报率项是动态生成的，用一次性的 async 处理器
     private readonly DispatcherTimer _timer;
 
     private IntPtr _hwnd;
@@ -242,12 +244,28 @@ public partial class TaskbarWidgetWindow : Window
                 if (startPoint.X > 0 && startPoint.X < tbWidth) startX = startPoint.X;
             }
 
+            // 任务栏上其他挂件（FluentFlyout 的媒体控件等）占住的横向区间
+            var spans = _settings.AvoidOtherWidgets
+                ? Native.ForeignWidgetSpans(taskbar, _hwnd)
+                : new List<(int Left, int Right, string Class)>();
+
             int xPhys = _settings.WidgetPosition switch
             {
                 1 => (tbWidth - widgetWidth) / 2,
                 2 => startX + gap,
                 _ => anchorX - widgetWidth - gap,
             };
+
+            // 和别人的挂件撞上了就往左让，直到空出来
+            if (_settings.WidgetPosition != 2)
+            {
+                for (int guard = 0; guard < 8; guard++)
+                {
+                    var hit = spans.FirstOrDefault(s => xPhys < s.Right + gap && xPhys + widgetWidth > s.Left - gap);
+                    if (hit.Class is null) break;
+                    xPhys = hit.Left - widgetWidth - gap;
+                }
+            }
 
             // 别跑出任务栏
             xPhys = Math.Clamp(xPhys, 0, Math.Max(0, tbWidth - widgetWidth));
@@ -263,13 +281,15 @@ public partial class TaskbarWidgetWindow : Window
             Canvas.SetTop(Pill, yPhys / windowScale);
 
             Diag($"tb={tbWidth}x{tbHeight} pill={widgetWidth}x{widgetHeight} at {xPhys},{yPhys} " +
-                 $"pos={_settings.WidgetPosition} gap={gap} anchorX={anchorX} startX={startX} trayHwnd={tray != IntPtr.Zero}");
+                 $"pos={_settings.WidgetPosition} gap={gap} anchorX={anchorX} startX={startX} " +
+                 $"trayHwnd={tray != IntPtr.Zero} spans={string.Join(";", spans.Select(s => $"{s.Left}..{s.Right}"))}");
 
             // Region 只保留 Pill 那块，其余区域不拦截任务栏点击
             ApplyRegion(xPhys, yPhys, widgetWidth, widgetHeight, dpi);
         }
         catch (Exception ex)
         {
+            Diag($"定位失败：{ex.GetType().Name} {ex.Message}");
             System.Diagnostics.Debug.WriteLine($"TaskbarWidget 定位失败：{ex}");
         }
         finally
@@ -321,24 +341,31 @@ public partial class TaskbarWidgetWindow : Window
         var accent = new SolidColorBrush(palette.Accent);
         accent.Freeze();
 
-        var shellBrush = new SolidColorBrush(Color.FromArgb(0x8C, palette.Accent.R, palette.Accent.G, palette.Accent.B));
-        shellBrush.Freeze();
+        var soft = new SolidColorBrush(Color.FromArgb(0x8C, palette.Accent.R, palette.Accent.G, palette.Accent.B));
+        soft.Freeze();
 
         var background = new SolidColorBrush(palette.Background);
         background.Freeze();
 
-        // 胶囊背景：跟随系统深浅色
+        // 卡片背景与边框：跟随系统深浅色
         Pill.Background = background;
         Pill.BorderBrush = new SolidColorBrush(palette.Border);
         Pill.BorderThickness = new Thickness(1);
 
-        PercentText.Foreground = accent;
-        Shell.BorderBrush = shellBrush;
-        Fill.Background = accent;
-        Tip.Fill = shellBrush;
-        Bolt.Fill = accent;
+        // 顶部高光
+        Highlight.BorderBrush = new SolidColorBrush(palette.Highlight);
 
-        string text = state.Percent is int p ? p.ToString() : "—";
+        // 左侧方块：强调色的浅色底，电池图形本身用强调色
+        IconTile.Background = new SolidColorBrush(palette.TileBackground);
+        Shell.BorderBrush = soft;
+        Fill.Background = accent;
+        Tip.Fill = soft;
+
+        // 文字
+        PercentText.Foreground = new SolidColorBrush(palette.TextPrimary);
+        CaptionText.Foreground = new SolidColorBrush(palette.TextPrimary);
+
+        string text = state.Percent is int p ? $"{p}%" : "—";
         if (PercentText.Text != text)
         {
             PercentText.Text = text;
@@ -346,12 +373,21 @@ public partial class TaskbarWidgetWindow : Window
             UpdatePosition();
         }
 
-        // 电量液面宽度（电池外壳 19 DIP，内边距 2）
-        double inner = 15;
+        CaptionText.Text = state.DevicePresent
+            ? state.Charging
+                ? "充电中"
+                : "WL Mouse"
+            : "未连接";
+
+        // 电量液面宽度（电池外壳 17 DIP，内边距 2）
+        double inner = 13;
         double ratio = state.Percent is int percent ? Math.Clamp(percent, 0, 100) / 100.0 : 0;
         Fill.Width = inner * ratio;
 
         BoltHost.Visibility = state.Charging ? Visibility.Visible : Visibility.Collapsed;
+        BoltBack.Fill = new SolidColorBrush(palette.Background);
+        BoltBack.Stroke = new SolidColorBrush(palette.Border);
+        Bolt.Fill = accent;
 
         Pill.ToolTip = state.DevicePresent
             ? state.Percent is int pp
@@ -465,11 +501,60 @@ public partial class TaskbarWidgetWindow : Window
     {
         ApplyMenuTexts();
         MenuTrayToggle.IsChecked = _settings.ShowTrayIcon;
+        RebuildQuickMenus();
+    }
+
+    /// <summary>
+    /// 右键菜单里的 DPI / 回报率子菜单。数据来自最近一次读到的配置，
+    /// 点选后直接写进鼠标，界面下一轮刷新。
+    /// </summary>
+    private void RebuildQuickMenus()
+    {
+        MouseConfig config = _battery.Config;
+
+        MenuDpi.Items.Clear();
+        if (config.DpiStages.Length == 0)
+        {
+            MenuDpi.Items.Add(new MenuItem { Header = "暂不可用", IsEnabled = false });
+        }
+        else
+        {
+            for (int i = 0; i < config.DpiStages.Length; i++)
+            {
+                int index = i;
+                var item = new MenuItem
+                {
+                    Header = $"第 {i + 1} 档 · {config.DpiStages[i]}",
+                    IsCheckable = true,
+                    IsChecked = i == config.ActiveStage,
+                };
+                item.Click += async (_, _) =>
+                    await _battery.ChangeConfigAsync(c => c.SetActiveDpiStage(index));
+                MenuDpi.Items.Add(item);
+            }
+        }
+
+        MenuPolling.Items.Clear();
+        int[] rates = PollingRates.All;
+        foreach (int hz in rates)
+        {
+            int value = hz;
+            var item = new MenuItem
+            {
+                Header = $"{hz} Hz",
+                IsCheckable = true,
+                IsChecked = config.PollingRateHz == hz,
+            };
+            item.Click += async (_, _) =>
+                await _battery.ChangeConfigAsync(c => c.SetPollingRate(value));
+            MenuPolling.Items.Add(item);
+        }
+
+        Diag($"menu dpi={MenuDpi.Items.Count} polling={MenuPolling.Items.Count} " +
+             $"rate={config.PollingRateHz} stage={config.ActiveStage}");
     }
 
     private void MenuRefresh_Click(object sender, RoutedEventArgs e) => _battery.RequestRefresh();
-
-    private void MenuDetails_Click(object sender, RoutedEventArgs e) => RequestOpenSettings?.Invoke();
 
     private void MenuSettings_Click(object sender, RoutedEventArgs e) => RequestOpenSettings?.Invoke();
 
@@ -501,7 +586,13 @@ public partial class TaskbarWidgetWindow : Window
 }
 
 /// <summary>控件配色。</summary>
-internal readonly record struct Palette(Color Accent, Color Background, Color Border)
+internal readonly record struct Palette(
+    Color Accent,
+    Color Background,
+    Color Border,
+    Color Highlight,
+    Color TileBackground,
+    Color TextPrimary)
 {
     public static Palette For(BatteryState state, bool lightTaskbar)
     {
@@ -523,14 +614,28 @@ internal readonly record struct Palette(Color Accent, Color Background, Color Bo
         // 任务栏本身可能是透明的（壁纸会透进来），所以控件自己要有足够的
         // 不透明度，否则数字在花哨壁纸上读不清。
         Color background = lightTaskbar
-            ? Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF)
-            : Color.FromArgb(0xDC, 0x2B, 0x2B, 0x2B);
+            ? Color.FromArgb(0xE8, 0xFF, 0xFF, 0xFF)
+            : Color.FromArgb(0xE0, 0x2B, 0x2B, 0x2B);
 
         Color border = lightTaskbar
             ? Color.FromArgb(0x30, 0x00, 0x00, 0x00)
             : Color.FromArgb(0x28, 0xFF, 0xFF, 0xFF);
 
-        return new Palette(accent, background, border);
+        // 顶部高光：FluentFlyout 的 TopBorder 用的是白色低透明度细线
+        Color highlight = lightTaskbar
+            ? Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF)
+            : Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF);
+
+        // 左侧方块底色：强调色淡淡的染色，和卡片的纯色底区分开
+        Color tile = lightTaskbar
+            ? Color.FromArgb(0x14, accent.R, accent.G, accent.B)
+            : Color.FromArgb(0x1E, accent.R, accent.G, accent.B);
+
+        Color textPrimary = lightTaskbar
+            ? Color.FromArgb(0xE4, 0x00, 0x00, 0x00)
+            : Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+
+        return new Palette(accent, background, border, highlight, tile, textPrimary);
     }
 }
 

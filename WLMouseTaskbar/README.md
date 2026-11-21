@@ -1,11 +1,16 @@
 # WL Mouse 任务栏电量（WLMouseTaskbar）
 
-把 WLmouse 鼠标电量**直接显示在 Windows 11 任务栏上**（贴紧通知区域左侧），
-外观参考 [FluentFlyout](https://github.com/unchihugo/FluentFlyout) 的 Taskbar Widget。
+把 WLmouse 鼠标电量**直接显示在 Windows 11 任务栏上**，外观与
+[FluentFlyout](https://github.com/unchihugo/FluentFlyout) 的 Taskbar Widget 同款：
+32 px 圆角卡片、顶部高光、左边色块里放电池图形、右边两行（电量 + 设备名）。
+
+设置界面用 WinUI / Windows 11「设置」那套视觉语言：左侧导航 + 右侧卡片，
+深浅色跟随系统。
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  ...  │ [🔋 90] │  ⌃  🔊  📶  🔋  14:29   │
+│  ...  │ [🔋 90%] │  ⌃  🔊  📶  🔋  14:29   │
+│         WL Mouse                                          │
 └──────────────────────────────────────────────────────────┘
          ↑ 本程序
 ```
@@ -14,15 +19,37 @@
 
 | 功能 | 位置 |
 | --- | --- |
-| 电量数字 + 电池液面 + 充电闪电 | 任务栏，紧贴通知区域左边 |
+| 电量百分比 + 电池液面 + 充电闪电 | 任务栏，可贴在通知区域左边 / 居中 / 靠近开始按钮 |
 | 悬停提示（电量 / 更新时间 / 操作提示） | 鼠标移到控件上 |
-| 左键单击 | 打开详情 / 设置窗口 |
-| 右键 | 刷新、设备信息、设置、退出等 |
+| 左键单击 | 打开设置窗口 |
+| 右键 | DPI 档位、回报率、刷新、设置、退出 |
 | 通知区托盘图标 | 可在设置里单独开关 |
 | 开机自启 | 写 `HKCU\...\Run`，无需管理员 |
 
 电量分档配色：≥50% 绿、20–50% 橙、<20% 红、充电中 蓝 + 闪电。
 配色跟随系统深浅色主题自动切换。
+
+## 设备设置（DPI / 回报率等）
+
+这些是**写进鼠标板载内存**的设置，改完立刻生效，拔掉接收器也保留。全部来自
+逆向出来的配置页协议：
+
+| 项目 | 可选值 | 协议 |
+| --- | --- | --- |
+| DPI 档位 | 50–30000，每档 50 | 配置页 `0x81` / `0x01`，当前档 `0x82` / `0x02` |
+| 回报率 | 125 / 250 / 500 / 1000 / 2000 / 4000 / 8000 Hz | 配置页 `0x80` / `0x00` |
+| 抬升高度 | 低 / 中 / 高 | 配置页 `0x88` / `0x08` |
+| 角度吸附 | 开 / 关 | 配置页 `0x84` / `0x04` |
+| Motion Sync | 开 / 关 | 配置页 `0x89` / `0x09` |
+| 去抖时间 | 0–15 ms | 设备页 `0x88` / `0x08` |
+| 休眠时间 | 30 s – 30 min | 设备页 `0x87` / `0x07` |
+
+写入后一律**读回校验**——鼠标会静默拒绝越界值，只有读回一致才算成功。
+配置页的命令必须带上「当前生效的板载配置档」（设备页 `0x85` 读出），
+写到别的档位会被忽略。
+
+设置项是按设备能力**动态生成**的：读不到某个字段就不显示对应的控件，
+不会出现「有这个开关但鼠标不认」的假控件。
 
 ## 做了什么（开发记录）
 
@@ -154,9 +181,17 @@ dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile
 WLMouseTaskbar.exe --snapshot out.png
 WLMouseTaskbar.exe --snapshot out.png --light
 
+# 把设置窗口整页渲染成 PNG（不依赖屏幕截图）
+WLMouseTaskbar.exe --shot-ui page.png --page overview
+WLMouseTaskbar.exe --shot-ui page.png --page device --light
+
 # 直接打开设置窗口
 WLMouseTaskbar.exe --settings
 ```
+
+> 截图为什么不用屏幕抓取：这台机器上别的置顶窗口会盖住被截窗口，
+> `CopyFromScreen` 和 `PrintWindow` 都拍不到。`--shot-ui` 让 WPF 自己
+> 用 `RenderTargetBitmap` 渲染，结果稳定。
 
 ## 设置
 
@@ -169,7 +204,13 @@ WLMouseTaskbar.exe --settings
 | `ShowTrayIcon` | 通知区图标开关 | true |
 | `WidgetPosition` | 0 = 紧贴通知区域，1 = 居中，2 = 靠近开始按钮 | 0 |
 | `WidgetOffset` | 与锚点的距离（DIP），用于和别的挂件错开 | 6 |
+| `AvoidOtherWidgets` | 自动避让任务栏上别的挂件 | true |
 | `HideWhenDisconnected` | 鼠标未连接时隐藏控件 | false |
+
+`AvoidOtherWidgets` 打开时不需要再手工调 `WidgetOffset`：程序会枚举任务栏的子窗口，
+读出它们**真实的可见区域**（`GetWindowRgn` + `GetRgnBox`），撞上就往左让。
+FluentFlyout、别的电量条这类挂件都是「窗口铺满整条任务栏 + region 裁剪」，
+光看窗口矩形是整条任务栏，只有 region 才是实际占位。
 
 出错时写到 `%APPDATA%\WLMouseTaskbar\error.log`。
 设置环境变量 `WLMOUSE_DIAG=1` 会额外把每次定位的 DPI / 尺寸写到 `%TEMP%\wlmouse-diag.txt`。
@@ -179,16 +220,30 @@ WLMouseTaskbar.exe --settings
 ```
 WLMouseTaskbar/
 ├── WLMouseTaskbar.csproj    WPF 单体程序（net9.0-windows）
-├── App.xaml(.cs)            应用入口、生命周期、单实例
+├── App.xaml(.cs)            应用入口、生命周期、单实例、截图模式
+├── MainWindow.*             设置 / 详情窗口（Fluent 布局，左侧导航 + 卡片）
+├── Controls/Ui.cs           用代码搭 Fluent 设置页的小工具
+├── Theme/Fluent.xaml        Fluent 控件样式（开关、滑杆、下拉、卡片、导航项）
+├── Theme/Light.xaml         浅色颜色令牌
+├── Theme/Dark.xaml          深色颜色令牌
+├── Theme/ThemeManager.cs    按系统深浅色切换令牌
 ├── TaskbarWidgetWindow.*    任务栏控件（窗口嵌入 + 电量绘制 + 右键菜单）
-├── StatusWindow.*           详情 / 设置窗口
 ├── TrayIcon.cs              通知区图标（WinForms NotifyIcon）
-├── BatteryService.cs        后台采样、失败指数退避、线程安全
+├── BatteryService.cs        后台采样、配置读写、失败指数退避、线程安全
 ├── AppSettings.cs           设置持久化 + 开机自启
-├── Native.cs                任务栏嵌入用到的 Win32 声明
+├── Native.cs                任务栏嵌入、region 查询用到的 Win32 声明
 ├── app.manifest             PerMonitorV2 DPI
-└── dist/WLMouseTaskbar.exe  发布产物（约 800 KB）
+└── dist/WLMouseTaskbar.exe  发布产物（约 870 KB）
 ```
+
+共享的协议源码在 `../WLMouseTray/`：`Hid.cs`、`WlMouse.cs`、`MouseConfig.cs`，
+通过 `<Compile Include>` 链接进来，两个程序用同一份实现。
+
+## 关于第三方 UI 库
+
+试过 WPF-UI（wpfui），但它的 `FluentWindow` + Mica 在这台机器上渲染成空白，
+而且本程序要嵌进任务栏，依赖越少越稳。所以 `Theme/` 下的样式是手写的——
+只覆盖真正用到的控件，约 400 行 XAML。
 
 ## 已知限制
 
@@ -209,3 +264,15 @@ WLMouseTaskbar/
    会把设置重置成默认值。读取端已经处理 BOM。
 4. 截图/测量脚本必须 `SetProcessDPIAware()`，否则拿到的是 125% 缩放下的虚拟坐标，
    会和程序算出的物理坐标对不上。
+5. **`WindowChrome` 不要设 `GlassFrameThickness="0"`**。设了之后窗口的 DWM 合成表面
+   会失效：布局照常、`IsWindowVisible` 也是 true、`WindowFromPoint` 也能命中，
+   但屏幕上什么都不画，截屏和 `PrintWindow` 都是空白。只给 `CaptionHeight` 和
+   `ResizeBorderThickness` 就正常。排查时用「把根元素背景改成纯红」二分最快。
+6. **`CreateRectRgn` / `GetRgnBox` 在 gdi32，不在 user32**。写成 `user32.dll` 会抛
+   `EntryPointNotFoundException`，而且只在真正调用的那一刻才炸。
+7. **`--shot-ui` 之类的截图模式绝不能写回设置**。WPF 在控件挂到可视化树时会补发一次
+   `Checked` / `ValueChanged`，如果处理器直接 `_settings.Save()`，用默认设置构造的
+   临时窗口就会把用户的配置覆盖成默认值。本程序用 `_snapshotState is not null` 拦住。
+8. **`Transfer` 要有时间预算**。鼠标对不认识的命令码会一直回 `0xA0`（pending），
+   照搬官方那种「5 轮 × 6 次 × 30 次轮询」要 27 秒才放弃，一次配置刷新十几条命令
+   就是几分钟，界面看起来像卡死。现在每条命令 1.2 秒封顶。

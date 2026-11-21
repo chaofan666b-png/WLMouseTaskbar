@@ -26,6 +26,7 @@
     <!-- 直接复用 WLMouseTray 里已实测可用的 HID 协议实现 -->
     <Compile Include="..\WLMouseTray\Hid.cs" Link="Shared\Hid.cs" />
     <Compile Include="..\WLMouseTray\WlMouse.cs" Link="Shared\WlMouse.cs" />
+    <Compile Include="..\WLMouseTray\MouseConfig.cs" Link="Shared\MouseConfig.cs" />
   </ItemGroup>
 
 </Project>

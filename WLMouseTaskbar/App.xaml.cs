@@ -9,7 +9,7 @@ public partial class App : System.Windows.Application
     private BatteryService? _battery;
     private TaskbarWidgetWindow? _widget;
     private TrayIcon? _tray;
-    private StatusWindow? _status;
+    private MainWindow? _status;
     private AppSettings _settings = new();
     private bool _openSettingsOnStart;
 
@@ -28,6 +28,20 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // 开发用：--shot-ui <png 路径> [--page device|widget|about] [--dark]
+        // 把设置窗口整页渲染成 PNG。屏幕截图在别的置顶窗口盖住时会拍到别的东西，
+        // 所以直接让 WPF 自己渲染。
+        int shotIndex = Array.IndexOf(e.Args, "--shot-ui");
+        if (shotIndex >= 0 && shotIndex + 1 < e.Args.Length)
+        {
+            int pageIndex = Array.IndexOf(e.Args, "--page");
+            string page = pageIndex >= 0 && pageIndex + 1 < e.Args.Length ? e.Args[pageIndex + 1] : "overview";
+            bool dark = e.Args.Contains("--dark");
+            bool light = e.Args.Contains("--light");
+            RunUiSnapshot(e.Args[shotIndex + 1], page, light ? false : dark ? true : (bool?)null);
+            return;
+        }
+
         _instanceMutex = new Mutex(true, @"Local\WLMouseTaskbar.SingleInstance", out bool isFirst);
         if (!isFirst)
         {
@@ -38,6 +52,8 @@ public partial class App : System.Windows.Application
         // 托盘 + 任务栏控件都是常驻的，关掉窗口不退出
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         DispatcherUnhandledException += OnDispatcherUnhandledException;
+
+        ThemeManager.Apply();
 
         _settings = AppSettings.Load();
         // 首次运行落一份默认配置，用户想改也能直接找到文件
@@ -101,12 +117,43 @@ public partial class App : System.Windows.Application
         }
     }
 
+    private void RunUiSnapshot(string path, string page, bool? dark)
+    {
+        try
+        {
+            ThemeManager.Forced = dark;
+            ThemeManager.Apply(dark);
+
+            var settings = new AppSettings();
+            using var battery = new BatteryService();
+
+            // 没接鼠标时也给一份像样的假数据，否则所有设置项都会被隐藏，看不出布局
+            BatteryState state = battery.State.DevicePresent
+                ? battery.State
+                : new BatteryState(true, 87, false, "1.0.2.13", "1.0.2.7",
+                    "00 A1 00 02 02 00 83 00 57", null, DateTime.Now);
+
+            var window = new MainWindow(battery, settings);
+            window.PrepareSnapshot(state, page);
+            window.Show();
+            window.UpdateLayout();
+
+            window.RenderTo(path);
+            window.Close();
+            Shutdown();
+        }
+        catch (Exception ex)
+        {
+            File.WriteAllText(path + ".error.txt", ex.ToString());
+            Shutdown(-1);
+        }
+    }
+
     private void OnBatteryUpdated(BatteryState state)
     {
         Dispatcher.BeginInvoke(() =>
         {
             _tray?.Update(state);
-            _status?.Apply(state);
             _widget?.SyncMenuState();
         }, DispatcherPriority.Background);
     }
@@ -115,11 +162,10 @@ public partial class App : System.Windows.Application
     {
         if (_status is null || !_status.IsVisible)
         {
-            _status = new StatusWindow(_battery!, _settings, OnSettingsChanged);
+            _status = new MainWindow(_battery!, _settings, OnSettingsChanged);
             _status.Closed += (_, _) => _status = null;
         }
 
-        _status.Apply(_battery!.State);
         _status.Show();
         _status.Activate();
         _status.Topmost = true;

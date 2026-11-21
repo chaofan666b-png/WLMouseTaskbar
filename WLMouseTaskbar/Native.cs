@@ -90,10 +90,13 @@ internal static class Native
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(IntPtr hwnd);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    // CreateRectRgn / CreateRoundRectRgn / GetRgnBox 都是 gdi32 的导出函数。
+    // user32 里只有 CreateRoundRectRgn 碰巧能被转发到，CreateRectRgn 会直接
+    // 抛 EntryPointNotFoundException。
+    [DllImport("gdi32.dll", SetLastError = true)]
     public static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport("gdi32.dll", SetLastError = true)]
     public static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom,
         int widthEllipse, int heightEllipse);
 
@@ -115,6 +118,92 @@ internal static class Native
     /// <summary>任务栏右侧的通知区域容器，用来把控件贴在它左边。</summary>
     public static IntPtr TrayNotify(IntPtr taskbar) =>
         FindWindowEx(taskbar, IntPtr.Zero, "TrayNotifyWnd", null);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    public static extern int GetRgnBox(IntPtr region, out RECT rect);
+
+    /// <summary>取窗口的可见区域包围盒。没有设置 region 或取不到时返回 null。</summary>
+    public static RECT? GetRegionBox(IntPtr hwnd)
+    {
+        IntPtr region = CreateRectRgn(0, 0, 0, 0);
+        if (region == IntPtr.Zero) return null;
+
+        try
+        {
+            // 返回 0 表示没有 region；复杂区域的类型是 2。分层窗口上不可靠，所以
+            // 调用方要把「取不到」当成「没有 region」，而不是当成错误。
+            int type = GetWindowRgn(hwnd, region);
+            if (type == 0) return null;
+            if (GetRgnBox(region, out RECT box) == 0) return null;
+            return box;
+        }
+        finally
+        {
+            DeleteObject(region);
+        }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern int GetWindowRgn(IntPtr hwnd, IntPtr region);
+
+    /// <summary>
+    /// 任务栏上「别人的挂件」占用的横向区间（物理像素，相对任务栏左边）。
+    ///
+    /// 任务栏上的挂件（FluentFlyout、各种电量条之类）大多是「窗口铺满整条任务栏 +
+    /// region 裁剪」的做法，光看窗口矩形是整条任务栏，只有 region 才是真实可见范围。
+    /// 标准部件（通知区域、任务视图、开始按钮、合成桥）在这里跳过。
+    /// </summary>
+    public static List<(int Left, int Right, string Class)> ForeignWidgetSpans(IntPtr taskbar, IntPtr self)
+    {
+        var spans = new List<(int, int, string)>();
+        if (taskbar == IntPtr.Zero) return spans;
+
+        GetWindowRect(taskbar, out RECT tb);
+        int tbWidth = tb.Right - tb.Left;
+        if (tbWidth <= 0) return spans;
+
+        var name = new StringBuilder(256);
+        IntPtr child = IntPtr.Zero;
+
+        while ((child = FindWindowEx(taskbar, child, null, null)) != IntPtr.Zero)
+        {
+            if (child == self) continue;
+
+            name.Clear();
+            if (GetClassName(child, name, name.Capacity) == 0) continue;
+            string cls = name.ToString();
+
+            if (IsStandardTaskbarPart(cls)) continue;
+
+            RECT? box = GetRegionBox(child);
+            if (box is not { } b) continue;
+
+            int left = b.Left - tb.Left;
+            int right = b.Right - tb.Left;
+            int width = right - left;
+
+            // 整条任务栏宽的区域说明它没裁剪，不算「占位」
+            if (width <= 0 || width >= tbWidth * 0.9) continue;
+
+            // 只看任务栏右半边的挂件（左边的那些不会和我们抢位置）
+            if (left < tbWidth / 2) continue;
+
+            spans.Add((left, right, cls));
+        }
+
+        return spans;
+    }
+
+    private static bool IsStandardTaskbarPart(string cls) =>
+        cls.Contains("TrayNotifyWnd", StringComparison.OrdinalIgnoreCase)
+        || cls.Contains("TrayShowDesktopButtonWnd", StringComparison.OrdinalIgnoreCase)
+        || cls.Contains("ReBarWindow32", StringComparison.OrdinalIgnoreCase)
+        || cls.Contains("MSTaskSwWClass", StringComparison.OrdinalIgnoreCase)
+        || cls.Contains("MSTaskListWClass", StringComparison.OrdinalIgnoreCase)
+        || cls.Contains("Start", StringComparison.OrdinalIgnoreCase)
+        || cls.Contains("Composition.DesktopWindowContentBridge", StringComparison.OrdinalIgnoreCase)
+        || cls.Contains("Shell_TrayWnd", StringComparison.OrdinalIgnoreCase)
+        || cls.Contains("Windows.UI.Core.CoreWindow", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>在任务栏的子窗口里找类名包含指定片段的那个（如 "Start"）。</summary>
     public static IntPtr FindTaskbarChild(IntPtr taskbar, string classFragment)

@@ -28,7 +28,7 @@ namespace WLMouseTray;
 /// 实测电量回包：00 A1 00 02 02 00 83 00 3B
 ///   → [7] = 充电标志，[8] = 电量百分比（0x3B = 59%）
 /// </summary>
-internal sealed class WlMouseDevice : IDisposable
+public sealed class WlMouseDevice : IDisposable
 {
     public const ushort DefaultVid = 0x36A7;
 
@@ -85,13 +85,23 @@ internal sealed class WlMouseDevice : IDisposable
     /// 收发一条命令，重试策略照搬官方 retrySetGet：
     /// 成功(0xA1)直接返回；无响应(&lt;0xA1)时轮询 30 次等待；忙(&gt;0xA1)时重发。
     /// </summary>
+    /// <param name="page">
+    /// 命令页。0 = 设备页（电量、固件、休眠、去抖），1 = 配置页（DPI、回报率、
+    /// 抬升高度等），3 = 按键页。官方 WebHID 的 n[4]，落在缓冲区 [5]。
+    /// </param>
+    /// <param name="budgetMs">
+    /// 单条命令的总时间预算。鼠标对不认识的命令码会一直回 0xA0（pending），
+    /// 而官方那种「5 轮 × 6 次 × 30 轮轮询」在真机上要 27 秒才能放弃，
+    /// 一次配置刷新有十几条命令，加起来就是几分钟，界面会像卡死。
+    /// </param>
     public bool Transfer(byte target, byte length, byte command, byte[]? payload,
-        out byte[] raw, int delayMs = 30)
+        out byte[] raw, int delayMs = 30, byte page = 0, int budgetMs = 1200)
     {
         var request = new byte[65];
         request[0] = 0;        // report id（与官方 WebHID 自带的前缀一致）
         request[3] = target;   // ← 官方 payload 的 n[2]
         request[4] = length;   // ← n[3]
+        request[5] = page;     // ← n[4]
         request[6] = command;  // ← n[5]
         if (payload != null)
         {
@@ -99,9 +109,12 @@ internal sealed class WlMouseDevice : IDisposable
         }
 
         raw = new byte[65];
+        var deadline = DateTime.UtcNow.AddMilliseconds(budgetMs);
 
         for (int round = 0; round < 5; round++)
         {
+            if (DateTime.UtcNow >= deadline) break;
+
             if (!Hid.SetFeature(_handle, request))
             {
                 _log.Add($"SetFeature 失败 err={Marshal.GetLastWin32Error()}");
@@ -112,6 +125,8 @@ internal sealed class WlMouseDevice : IDisposable
 
             for (int attempt = 0; attempt < 6; attempt++)
             {
+                if (DateTime.UtcNow >= deadline) return false;
+
                 Array.Clear(raw);
                 if (!Hid.GetFeature(_handle, raw))
                 {
@@ -123,23 +138,55 @@ internal sealed class WlMouseDevice : IDisposable
                 byte status = raw[1];
 
                 if (status is 0xA1 or 0x02) return true;   // 成功
+                if (status == 0xA2)                        // 设备明确说「不支持这条命令」
+                {
+                    _log.Add($"页 0x{page:X2} 命令 0x{command:X2} 不受支持");
+                    return false;
+                }
+
                 if (status > 0xA1) break;                  // 忙 -> 重发
                 if (status == 0) Thread.Sleep(delayMs);    // 空 -> 稍等再重发
 
-                // 无响应 (0xA0)：继续轮询，最多约 1 秒
-                for (int poll = 0; poll < 30; poll++)
+                // 无响应 (0xA0)：继续轮询，直到预算用完
+                for (int poll = 0; poll < 30 && DateTime.UtcNow < deadline; poll++)
                 {
                     Thread.Sleep(delayMs);
                     Array.Clear(raw);
                     if (!Hid.GetFeature(_handle, raw)) return false;
                     LastResponse = (byte[])raw.Clone();
                     if (raw[1] is 0xA1 or 0x02) return true;
+                    if (raw[1] is 0xA2) return false;
                     if (raw[1] > 0xA1) break;
                 }
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// 发一条带页号 / 参数的命令，返回去掉 7 字节回包头之后的 payload。
+    ///
+    /// 注意 <paramref name="length"/> 是**请求里的数据长度**，和 <paramref name="args"/>
+    /// 的个数并不总相等：读命令（电量、固件、DPI 表）由官方规定固定长度而参数为空，
+    /// 写命令则是 length == args.Length。
+    ///
+    /// 回包：<c>[1]</c>=状态 <c>[4]</c>=长度 <c>[5]</c>=页 <c>[6]</c>=命令 <c>[7..]</c>=数据。
+    /// </summary>
+    public bool Command(byte target, byte page, byte command, byte length,
+        byte[]? args, out byte[] payload, int delayMs = 30, int budgetMs = 1200)
+    {
+        payload = Array.Empty<byte>();
+
+        if (!Transfer(target, length, command, args, out byte[] raw, delayMs, page, budgetMs))
+            return false;
+
+        int n = Math.Min(raw[4], raw.Length - 7);
+        if (n <= 0) return true;
+
+        payload = new byte[n];
+        Array.Copy(raw, 7, payload, 0, n);
+        return true;
     }
 
     /// <summary>读取电量。返回 (是否充电, 电量百分比)。</summary>

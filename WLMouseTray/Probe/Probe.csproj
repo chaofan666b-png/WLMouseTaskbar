@@ -12,6 +12,7 @@
   <ItemGroup>
     <Compile Include="..\Hid.cs" Link="Hid.cs" />
     <Compile Include="..\WlMouse.cs" Link="WlMouse.cs" />
+    <Compile Include="..\MouseConfig.cs" Link="MouseConfig.cs" />
   </ItemGroup>
 
 </Project>

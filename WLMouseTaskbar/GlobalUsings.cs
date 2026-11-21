@@ -6,3 +6,5 @@ global using System.IO;
 global using System.Linq;
 global using System.Threading;
 global using System.Threading.Tasks;
+// HID 协议层与 WLMouseTray 共用同一份源码，命名空间也保持一致
+global using WLMouseTray;

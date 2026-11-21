@@ -19,6 +19,12 @@ public sealed class AppSettings
     /// <summary>控件与锚点之间的间距（DIP）。任务栏上已有别的挂件时调大可以错开。</summary>
     public double WidgetOffset { get; set; } = 6;
 
+    /// <summary>
+    /// 自动避让任务栏上的其他挂件（例如 FluentFlyout 的媒体控件）。
+    /// 打开后不需要手工调距离，撞上就往左让。
+    /// </summary>
+    public bool AvoidOtherWidgets { get; set; } = true;
+
     /// <summary>未连接鼠标时是否隐藏控件。</summary>
     public bool HideWhenDisconnected { get; set; }
 

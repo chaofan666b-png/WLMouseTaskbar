@@ -1,0 +1,189 @@
+<Window x:Class="WLMouseTaskbar.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WL Mouse"
+        Width="1000" Height="700"
+        MinWidth="820" MinHeight="520"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBackground}"
+        FontFamily="Microsoft YaHei UI"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="ClearType"
+        UseLayoutRounding="True">
+
+    <!-- 自定义标题栏：无边框 + 系统缩放边框，拖拽区只占顶部 44px -->
+
+
+    <!--
+        自定义标题栏。注意别设 GlassFrameThickness="0"：那样会让窗口的 DWM
+        合成表面失效，窗口内容照常布局、IsWindowVisible 也是 true，但屏幕上
+        什么都不画（截屏和 PrintWindow 都是空白）。只给 CaptionHeight 和
+        ResizeBorderThickness 就正常。
+    -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="44" ResizeBorderThickness="6" />
+    </WindowChrome.WindowChrome>
+
+    <Border x:Name="RootBorder" Background="{DynamicResource WindowBackground}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="44" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- 标题栏 -->
+        <Grid Grid.Row="0" Background="Transparent">
+            <StackPanel Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+                <Image Source="/app.ico" Width="18" Height="18" />
+                <TextBlock Text="WL Mouse" Margin="10,0,0,0" FontSize="12.5"
+                           Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                        VerticalAlignment="Top">
+                <Button x:Name="MinimizeButton" Click="Minimize_Click"
+                        Style="{StaticResource CaptionButton}" Content="&#xE921;" />
+                <Button x:Name="MaximizeButton" Click="Maximize_Click"
+                        Style="{StaticResource CaptionButton}" Content="&#xE922;" />
+                <Button x:Name="CloseButton" Click="Close_Click"
+                        Style="{StaticResource CaptionButtonClose}" Content="&#xE8BB;" />
+            </StackPanel>
+        </Grid>
+
+        <!-- 主体 -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="248" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧导航 -->
+            <Grid Grid.Column="0" Background="{DynamicResource NavBackground}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- 设备状态小徽章 -->
+                <Border Grid.Row="0" Margin="16,4,16,12" Padding="12,10"
+                        Background="{DynamicResource CardBackground}"
+                        BorderBrush="{DynamicResource CardStroke}"
+                        BorderThickness="1" CornerRadius="7">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid Grid.Column="0" Width="30" Height="30">
+                            <Border x:Name="NavBatteryShell" CornerRadius="8"
+                                    BorderThickness="1.5" Background="Transparent" />
+                            <TextBlock x:Name="NavBatteryText" Text="—" FontSize="11" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
+
+                        <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                            <TextBlock x:Name="NavDeviceName" Text="WL Mouse"
+                                       FontSize="13" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimary}" />
+                            <TextBlock x:Name="NavDeviceStatus" Text="正在读取…"
+                                       FontSize="11.5" Foreground="{DynamicResource TextSecondary}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- 导航项 -->
+                <StackPanel Grid.Row="1" Margin="8,0">
+                    <RadioButton x:Name="NavOverview" Style="{StaticResource NavItem}" GroupName="Nav"
+                                 Tag="overview" Checked="Nav_Checked" IsChecked="True">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavGlyph}" Text="&#xE9A9;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="概览" />
+                        </StackPanel>
+                    </RadioButton>
+
+                    <RadioButton x:Name="NavDevice" Style="{StaticResource NavItem}" GroupName="Nav"
+                                 Tag="device" Checked="Nav_Checked">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavGlyph}" Text="&#xE962;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="设备" />
+                        </StackPanel>
+                    </RadioButton>
+
+                    <RadioButton x:Name="NavWidget" Style="{StaticResource NavItem}" GroupName="Nav"
+                                 Tag="widget" Checked="Nav_Checked">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavGlyph}" Text="&#xE7F4;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="任务栏显示" />
+                        </StackPanel>
+                    </RadioButton>
+
+                    <RadioButton x:Name="NavAbout" Style="{StaticResource NavItem}" GroupName="Nav"
+                                 Tag="about" Checked="Nav_Checked">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource NavGlyph}" Text="&#xE946;" />
+                            <TextBlock Style="{StaticResource NavLabel}" Text="关于" />
+                        </StackPanel>
+                    </RadioButton>
+                </StackPanel>
+
+                <!-- 底部：开机自启 -->
+                <Border Grid.Row="2" Margin="16,0,16,16" Padding="12,10"
+                        Background="{DynamicResource CardBackground}"
+                        BorderBrush="{DynamicResource CardStroke}"
+                        BorderThickness="1" CornerRadius="7">
+                    <Grid>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="开机自启" FontSize="13"
+                                       Foreground="{DynamicResource TextPrimary}" />
+                            <TextBlock Text="写入当前用户启动项" FontSize="11"
+                                       Foreground="{DynamicResource TextSecondary}" Margin="0,2,0,0" />
+                        </StackPanel>
+                        <CheckBox x:Name="AutoStartCheck" HorizontalAlignment="Right"
+                                  VerticalAlignment="Center"
+                                  Style="{StaticResource FluentToggleSwitch}"
+                                  Checked="AutoStart_Changed" Unchecked="AutoStart_Changed" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- 右侧内容 -->
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <ScrollViewer x:Name="PageScroller" Grid.Row="0"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Padding="0,0,4,0">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBar}" />
+                    </ScrollViewer.Resources>
+                    <StackPanel x:Name="PageHost" Margin="32,8,32,24" MaxWidth="720"
+                                HorizontalAlignment="Left" />
+                </ScrollViewer>
+
+                <!-- 底部操作条 -->
+                <Border Grid.Row="1" Padding="32,12" BorderThickness="0,1,0,0"
+                        BorderBrush="{DynamicResource CardStroke}"
+                        Background="{DynamicResource WindowBackground}">
+                    <Grid>
+                        <TextBlock x:Name="StatusBarText" VerticalAlignment="Center"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource TextSecondary}" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button x:Name="RefreshButton" Content="立即刷新"
+                                    Style="{StaticResource FluentButton}" Click="Refresh_Click" />
+                            <Button Content="关闭" Margin="8,0,0,0"
+                                    Style="{StaticResource FluentButton}" Click="Close_Click" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+    </Border>
+</Window>
